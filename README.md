@@ -102,10 +102,49 @@ ap.play("walk")
 
 ## Exporting from Adobe Animate
 
-1. Go to **File → Publish Settings** (or **File → Export → Export Video/Texture Atlas**)
-2. Select **Texture Atlas** as the format.
-3. Check **JSON** and **PNG**.
-4. Click **Publish / Export**.
+# Generating a Texture Atlas in Adobe Animate
+
+This guide explains how to convert vector animations into a packed texture atlas (bitmap sheet and JSON data) for use in external game engines like Unity, Godot, or web frameworks.
+
+---
+
+## Step-by-Step Instructions
+
+### Step 1: Select the Animation Symbol
+1. Open your project file in **Adobe Animate**.
+2. Locate your animated character or asset.
+3. Open the **Library** panel (`Ctrl + L` on Windows or `Cmd + L` on Mac).
+4. Identify the **Movie Clip**, **Graphic**, or **Button** symbol containing the animation.
+   * *Alternative:* You can right-click the symbol instance directly on the **Stage**.
+
+### Step 2: Open the Generation Menu
+1. **Right-click** the chosen symbol in the Library or Stage.
+2. Select **Generate Texture Atlas** from the context menu to open the settings window.
+
+### Step 3: Configure Texture Settings
+In the **Global** tab, adjust these parameters to optimize your output:
+* **Image Dimension**: Set the maximum texture limits (e.g., `2048 x 2048`). Check **Autosize** to scale the sheet down to the minimum necessary size.
+* **Optimize Dimensions**: Enable this option to tightly crop empty pixels around each image frame.
+* **Padding**: Set a pixel spacing value (e.g., `2px`) between individual textures to avoid color bleeding.
+* **Format**: Choose **PNG 32-bit** to keep background transparency intact.
+
+### Step 4: Preview and Export
+1. Click the **Preview** tab to check the structural layout of the packed textures.
+2. Click **Browse** next to the **Output Folder** field to define your save location.
+3. Click the **Export** button to generate your files.
+
+---
+
+## Understanding the Output Files
+
+The export process creates a single folder containing three critical files:
+
+
+| File Name | Format | Description |
+| :--- | :--- | :--- |
+| `Animation.json` | JSON | Holds the original layer structures, frame timings, and animation hierarchy data. |
+| `spritesheet.png` | PNG | The physical composite image containing all individual animation pieces. |
+| `spritesheet.json` | JSON | Stores the explicit X/Y coordinates and pixel sizes for mapping each sprite piece. |
 
 Adobe Animate will generate `spritemap1.json`, one or more `Animation.json` files, and `spritemap1.png`.
 
