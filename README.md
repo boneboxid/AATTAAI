@@ -100,9 +100,7 @@ ap.play("walk")
 
 ---
 
-## Exporting from Adobe Animate
-
-# Generating a Texture Atlas in Adobe Animate
+## Generating a Texture Atlas in Adobe Animate
 
 This guide explains how to convert vector animations into a packed texture atlas (bitmap sheet and JSON data) for use in external game engines like Unity, Godot, or web frameworks.
 
