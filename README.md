@@ -107,7 +107,7 @@ This guide explains how to convert vector animations into a packed texture atlas
 
 ---
 
-for batch export you can go here : [Batch-Export-Texture-Atlas-plugin](https://github.com/Ghofar05/Batch-Export-Texture-Atlas)
+for batch export you can go here : [Batch-Export-Texture-Atlas-plugin](https://github.com/boneboxid/Batch-Export-Texture-Atlas)
 
 ## Step-by-Step Instructions
 
