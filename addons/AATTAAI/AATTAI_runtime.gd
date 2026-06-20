@@ -27,7 +27,7 @@ func build(atlas_path: String, anim_path: String, tex_path: String) -> void:
 	var atlas_data = _load_json(atlas_path)
 	var anim_data  = _load_json(anim_path)
 	if atlas_data == null or anim_data == null:
-		push_error("[AdobeAnimateRuntime] Gagal load JSON")
+		push_error("[AATAIRuntime] cannot load JSON")
 		return
 
 	_sprites = _parse_atlas(atlas_data)
@@ -42,7 +42,7 @@ func build(atlas_path: String, anim_path: String, tex_path: String) -> void:
 		_texture = ImageTexture.create_from_image(img)
 
 	if _texture == null:
-		push_error("[AdobeAnimateRuntime] Texture tidak ditemukan: " + tex_path)
+		push_error("[AdobeAnimateRuntime] Texture not found: " + tex_path)
 		return
 
 	# Hapus child lama kecuali AnimationPlayer
@@ -176,7 +176,7 @@ func build(atlas_path: String, anim_path: String, tex_path: String) -> void:
 	ap.add_animation_library("", lib)
 	if lib.get_animation_list().size() > 0 and auto_play.is_empty():
 		ap.autoplay = lib.get_animation_list()[0]
-	print("[AdobeAnimateRuntime] Selesai. Parts: %d, FPS: %.1f" % [layer_nodes.size(), _fps])
+	print("[AATAAIRuntime] Done. Parts: %d, FPS: %.1f" % [layer_nodes.size(), _fps])
 
 # ── helpers ──────────────────────────────────────────────
 func _load_json(path: String):

@@ -32,17 +32,17 @@ func import_folder(atlas_json_path: String, anim_folder: String,
 	var atlas_data = _load_json(atlas_json_path)
 	if atlas_data is String: return "Atlas JSON: " + atlas_data
 	var sprites: Dictionary = _parse_atlas(atlas_data)
-	if sprites.is_empty(): return "Tidak ada sprite di atlas JSON."
+	if sprites.is_empty(): return "no sprite in atlas JSON."
 
 	# 2. Texture
 	var texture: Texture2D = _load_texture(png_path)
-	if texture == null: return "Tidak bisa load PNG: " + png_path
+	if texture == null: return "cannot load PNG: " + png_path
 
 	# 3. Cari semua Animation JSON di folder
 	if anim_files.is_empty():
 		anim_files = _scan_json_files(anim_folder)
 	if anim_files.is_empty():
-		return "Tidak ada file JSON di folder: " + anim_folder
+		return "no JSON file inside in the folder: " + anim_folder
 
 	# 4. Parse semua animasi
 	# Setiap file → satu entry {anim_name, layers[], fps}
@@ -66,7 +66,7 @@ func import_folder(atlas_json_path: String, anim_folder: String,
 			all_animations.append(anim)
 
 	if all_animations.is_empty():
-		return "Semua file JSON gagal di-parse."
+		return "all file JSON failed to parse."
 
 	# 5. Build scene
 	return _build_scene(sprites, texture, all_animations, out_path)
@@ -96,14 +96,14 @@ func _scan_json_files(folder: String) -> Array:
 # JSON loader — handle UTF-8 BOM
 # ─────────────────────────────────────────────────────────
 func _load_json(path: String):
-	if path.is_empty(): return "Path kosong"
-	if not FileAccess.file_exists(path): return "File tidak ditemukan: " + path
+	if path.is_empty(): return "Path empty"
+	if not FileAccess.file_exists(path): return "File not found: " + path
 	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null: return "Tidak bisa buka file"
+	if f == null: return "can't access file"
 	var text := f.get_as_text(); f.close()
 	if text.begins_with("\ufeff"): text = text.substr(1)
 	var result := JSON.parse_string(text)
-	if result == null: return "JSON parse error di: " + path
+	if result == null: return "JSON parse error: " + path
 	return result
 
 func _load_texture(path: String) -> Texture2D:
@@ -418,12 +418,12 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 	var packed := PackedScene.new()
 	if packed.pack(root) != OK: return "PackedScene.pack() gagal"
 	if ResourceSaver.save(packed, out_path) != OK:
-		return "ResourceSaver.save() gagal untuk: " + out_path
+		return "ResourceSaver.save() failed for: " + out_path
 
-	print("[AdobeAnimateImporter] ✅ Selesai!")
+	print("[AATAAI] ✅ done!")
 	print("  Scene : ", out_path)
 	print("  Nodes : ", layer_node_map.size(), " Sprite2D")
-	print("  Animasi: ", anim_list)
+	print("  Animation: ", anim_list)
 	return ""
 
 # ─────────────────────────────────────────────────────────

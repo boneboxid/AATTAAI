@@ -20,7 +20,7 @@ func _on_import_menu_pressed() -> void:
 
 func _build_dialog() -> Window:
 	var dlg := Window.new()
-	dlg.title = "Import Adobe Animate"
+	dlg.title = "AATAAI"
 	dlg.size = Vector2i(560, 420)
 	dlg.exclusive = true
 
@@ -36,7 +36,7 @@ func _build_dialog() -> Window:
 	var row_atlas := _browse_row(atlas_edit); vbox.add_child(row_atlas)
 
 	# ── Folder Animation JSONs ────────────────────────────
-	vbox.add_child(_label("Folder Animation JSONs (semua *.json di-import):"))
+	vbox.add_child(_label("Folder Animation JSONs (all *.json di-import):"))
 	var folder_edit := LineEdit.new()
 	folder_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	folder_edit.placeholder_text = "res://assets/animations/"
@@ -47,7 +47,7 @@ func _build_dialog() -> Window:
 
 	# ── Preview daftar file ───────────────────────────────
 	var file_list_lbl := Label.new()
-	file_list_lbl.text = "(pilih folder untuk melihat daftar file)"
+	file_list_lbl.text = "(select the folder for the list)"
 	file_list_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	file_list_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
 	vbox.add_child(file_list_lbl)
@@ -119,23 +119,23 @@ func _build_dialog() -> Window:
 		var fps_val := int(fps_spin.value)
 
 		if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or out_path.is_empty():
-			status_lbl.text = "❌ Isi semua field terlebih dahulu."
+			status_lbl.text = "fill all the field."
 			return
 
 		status_lbl.text = "⏳ Importing..."
-		var importer = load("res://addons/adobe_animate_importer/importer.gd").new()
+		var importer = load("res://addons/AATTAAI/importer.gd").new()
 		var err: String = importer.import_folder(atlas_path, folder_path, png_path, out_path, fps_val)
 
 		if err == "":
 			# Hitung berapa file yang diimport
 			var files = importer._scan_json_files(folder_path)
-			status_lbl.text = "✅ Selesai! %d animasi dari %d file.\nScene: %s" % [
+			status_lbl.text = "done! %d animation from %d file.\nScene: %s" % [
 				files.size(), files.size(), out_path
 			]
 			# Refresh FileSystem di editor
 			get_editor_interface().get_resource_filesystem().scan()
 		else:
-			status_lbl.text = "❌ Error: " + err
+			status_lbl.text = " Error: " + err
 	)
 
 	dlg.close_requested.connect(func(): dlg.hide())
@@ -146,12 +146,12 @@ func _build_dialog() -> Window:
 func _update_file_list(folder: String, lbl: Label) -> void:
 	if folder.is_empty() or not DirAccess.dir_exists_absolute(
 			ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder):
-		lbl.text = "(folder tidak ditemukan)"
+		lbl.text = "(folder not found)"
 		return
 	# Scan langsung tanpa instansiasi importer
 	var dir := DirAccess.open(folder)
 	if dir == null:
-		lbl.text = "(tidak bisa buka folder)"
+		lbl.text = "(can't open the folder)"
 		return
 	var files: Array = []
 	dir.list_dir_begin()
@@ -165,9 +165,9 @@ func _update_file_list(folder: String, lbl: Label) -> void:
 	dir.list_dir_end()
 	files.sort()
 	if files.is_empty():
-		lbl.text = "⚠ Tidak ada Animation JSON di folder ini."
+		lbl.text = "There is no Animation JSON in the folder."
 	else:
-		lbl.text = "📂 %d file ditemukan:\n  • " % files.size() + "\n  • ".join(files)
+		lbl.text = "%d file found:\n  • " % files.size() + "\n  • ".join(files)
 
 func _label(text: String) -> Label:
 	var l := Label.new(); l.text = text; return l
