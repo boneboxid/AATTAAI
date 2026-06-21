@@ -1,0 +1,17 @@
+GAME ASSET LICENSECopyright (c) 2026 Boneboxid
+
+By using these assets, you agree to the following terms:
+
+1. PERMITTED USES
+
+- You MAY use these assets in both personal and commercial game projects.
+- You MAY modify these assets to fit your project's needs.
+
+2. RESTRICTIONS
+
+- You SHALL NOT resell, redistribute, sub-license, or share these assets (original or modified) as standalone files or part of an asset pack.
+- You SHALL NOT extract these assets from the plugin to distribute them independently.
+
+3. CONDITION
+
+- Distribution is ONLY allowed when these assets are fully embedded inside a finished game, making them non-extractable by end-users.

@@ -21,7 +21,7 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 
 ## Installation
 
-1. Copy the `addons/adobe_animate_importer/` folder into your Godot project's `addons/` folder.
+1. Copy the `addons/AATAAI/` folder into your Godot project's `addons/` folder. or you can download from asset store
 2. Open **Project → Project Settings → Plugins**.
 3. Enable **Adobe Animate Importer**.
 
@@ -53,7 +53,7 @@ are kept separate with a `#index` suffix.
 
 ## Usage — Via Script (Runtime)
 
-Attach `adobe_animate_runtime.gd` to a `Node2D`, then call `build()`:
+Attach `AATAAI_runtime.gd` to a `Node2D`, then call `build()`:
 
 ```gdscript
 func _ready():
@@ -87,9 +87,9 @@ named after its **filename** (without extension).
 assets/
 ├── spritemap1.json
 ├── spritemap1.png
-├── idle.json       → animation "idle"
-├── walk.json       → animation "walk"
-└── run.json        → animation "run"
+├── Animation001.json       → animation "idle"
+├── Animation002.json       → animation "walk"
+└── Animation003.json        → animation "run"
 ```
 
 ```gdscript
