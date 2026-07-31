@@ -108,7 +108,10 @@ func _load_json(path: String):
 
 func _load_texture(path: String) -> Texture2D:
 	if path.is_empty(): return null
-	if ResourceLoader.exists(path): return ResourceLoader.load(path) as Texture2D
+	if ResourceLoader.exists(path):
+		var res = ResourceLoader.load(path)
+		if res is Texture2D:
+			return res
 	if not FileAccess.file_exists(path): return null
 	var img := Image.new()
 	if img.load(path) != OK: return null
@@ -326,6 +329,24 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 		animation.loop_mode = Animation.LOOP_LINEAR
 		animation.length = anim["length"]
 
+		# Lacak node mana saja yang aktif di animasi ini
+		var active_keys := {}
+		for layer in anim["layers"]:
+			var lookup := str(afi) + "#" + str(layer["layer_idx"])
+			var node_key: String = anim_layer_key.get(lookup, "")
+			if node_key != "":
+				active_keys[node_key] = true
+
+		# Hide node yang tidak aktif di animasi ini di t = 0
+		for node_key in layer_node_map:
+			if not active_keys.has(node_key):
+				var node: Sprite2D = layer_node_map[node_key]
+				var npath := root.get_path_to(node)
+				var t_vis := animation.add_track(Animation.TYPE_VALUE)
+				animation.track_set_path(t_vis, NodePath(str(npath) + ":visible"))
+				animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
+				animation.track_insert_key(t_vis, 0.0, false)
+
 		for layer in anim["layers"]:
 			var lookup := str(afi) + "#" + str(layer["layer_idx"])
 			var node_key: String = anim_layer_key.get(lookup, "")
@@ -338,16 +359,19 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			var t_scl    := animation.add_track(Animation.TYPE_VALUE)
 			var t_rect   := animation.add_track(Animation.TYPE_VALUE)
 			var t_offset := animation.add_track(Animation.TYPE_VALUE)
+			var t_vis    := animation.add_track(Animation.TYPE_VALUE)
 
 			animation.track_set_path(t_pos,    NodePath(str(npath) + ":position"))
 			animation.track_set_path(t_rot,    NodePath(str(npath) + ":rotation"))
 			animation.track_set_path(t_scl,    NodePath(str(npath) + ":scale"))
 			animation.track_set_path(t_rect,   NodePath(str(npath) + ":region_rect"))
 			animation.track_set_path(t_offset, NodePath(str(npath) + ":offset"))
+			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
 
 			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR_ANGLE)
 			animation.track_set_interpolation_type(t_rect,   Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_offset, Animation.INTERPOLATION_NEAREST)
+			animation.track_set_interpolation_type(t_vis,    Animation.INTERPOLATION_NEAREST)
 
 			# Kumpulkan keyframe dulu, normalisasi rotasi, lalu insert
 			var kf_times:  Array = []
@@ -356,6 +380,35 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			var kf_scl:    Array = []
 			var kf_rect:   Array = []
 			var kf_offset: Array = []
+			var kf_vis:    Array = []
+
+			# Lacak status visibilitas per frame
+			var frame_activity := {}
+			for fr in layer["frames"]:
+				var fi := int(fr["index"])
+				var du := int(fr["duration"])
+				var active: bool = not fr["elements"].is_empty()
+				for f_idx in range(fi, fi + du):
+					frame_activity[f_idx] = active
+
+			var total_frames := int(round(anim["length"] * fps))
+			var last_vis_state := false
+			if frame_activity.has(0):
+				last_vis_state = frame_activity[0]
+			else:
+				last_vis_state = false
+			kf_vis.append({"t": 0.0, "v": last_vis_state})
+
+			for f_idx in range(1, total_frames):
+				var current_state := false
+				if frame_activity.has(f_idx):
+					current_state = frame_activity[f_idx]
+				else:
+					current_state = false
+				
+				if current_state != last_vis_state:
+					kf_vis.append({"t": f_idx / fps, "v": current_state})
+					last_vis_state = current_state
 
 			for fr in layer["frames"]:
 				var fi   := int(fr["index"])
@@ -398,6 +451,8 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 				animation.track_insert_key(t_rect, entry["t"], entry["v"])
 			for entry in kf_offset:
 				animation.track_insert_key(t_offset, entry["t"], entry["v"])
+			for entry in kf_vis:
+				animation.track_insert_key(t_vis, entry["t"], entry["v"])
 
 		var safe_name := _sanitize_anim_name(anim["anim_name"])
 		# Hindari nama duplikat di library
