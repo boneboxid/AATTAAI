@@ -1,13 +1,22 @@
-# Adobe Animate → Godot 4 Importer Plugin
+# Adobe Animate → Godot 4 Importer Plugin (AATTAAI)
 
-A Godot 4 plugin for importing **texture atlases** and **animations** from Adobe Animate
-into Godot scenes with a full **AnimationPlayer**, including per-part transformations.
+A Godot 4 plugin for importing texture atlases and animations exported from Adobe Animate into Godot scenes with a full AnimationPlayer, including per-part transforms and sprite swapping.
+
+---
+
+## Features
+
+- Import Adobe Animate texture atlas (spritesheet + atlas JSON) and animation JSON.
+- Build a Godot scene with one Sprite2D node per animation layer and a shared AnimationPlayer.
+- Keyframed position, rotation, scale and region_rect (texture swapping) per frame.
+- Support for multiple animations (import a folder of Animation JSON files).
+- Runtime API to build importer from code.
 
 ---
 
 ## Adobe Animate Output Structure
 
-Adobe Animate generates three files when exporting a **Texture Atlas**:
+Adobe Animate typically generates these files when exporting a texture atlas:
 
 | File | Description |
 |------|-------------|
@@ -21,21 +30,24 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 
 ## Installation
 
-1. Copy the `addons/AATAAI/` folder into your Godot project's `addons/` folder. or you can download from asset store
+1. Copy the `addons/AATTAAI/` folder into your Godot project's `addons/` folder (note: the correct folder name is `AATTAAI`).
 2. Open **Project → Project Settings → Plugins**.
 3. Enable **Adobe Animate Importer**.
 
+(You can also package and install from the Godot AssetLib if you publish there.)
+
 ---
 
-## Usage — Via Menu (Import to Scene File)
+## Usage — Via Editor Menu (Import to Scene File)
 
 1. Open **Tools → Import Adobe Animate...**
-2. Fill in the paths to `spritemap1.json`, the animation JSON file (or folder), and `spritemap1.png`.
-3. Set the output scene path (`.tscn`).
+2. Provide paths for `spritemap1.json` (atlas JSON), the animation JSON file (or folder), and `spritemap1.png` (atlas PNG).
+3. Set the output scene path (e.g. `res://scenes/MyCharacter.tscn`).
 4. Click **Import & Generate Scene**.
 
-The generated scene contains:
-```
+The generated scene structure looks like:
+
+```text
 AnimatedCharacter (Node2D)
 ├── AnimationPlayer
 ├── leg_arm (Sprite2D)      ← one node per layer
@@ -45,15 +57,13 @@ AnimatedCharacter (Node2D)
 └── ...
 ```
 
-**Shared sprites:** layers with the same name across different animation files share a single
-`Sprite2D` node — no duplicate nodes. Layers with duplicate names *within* the same animation
-are kept separate with a `#index` suffix.
+Shared sprites: layers with the same name across different animation files share a single `Sprite2D` node — no duplicate nodes. Layers with duplicate names within the same animation are kept separate with a `#index` suffix.
 
 ---
 
 ## Usage — Via Script (Runtime)
 
-Attach `AATAAI_runtime.gd` to a `Node2D`, then call `build()`:
+Attach `AATAAI_runtime.gd` to a `Node2D`, then call `build()` from `_ready()` or another initialization function:
 
 ```gdscript
 func _ready():
@@ -65,13 +75,14 @@ func _ready():
     $MyCharacter/AnimationPlayer.play("walk")
 ```
 
-Or set the export vars directly in the Inspector:
+You can also set the export-vars in the Inspector on the runtime node:
 
-```
-atlas_json_path     = res://assets/spritemap1.json
-animation_json_path = res://assets/Animation.json
-png_path            = res://assets/spritemap1.png
-auto_play           = walk
+```gdscript
+# export vars on the runtime node
+atlas_json_path     = "res://assets/spritemap1.json"
+animation_json_path = "res://assets/Animation.json"  # or a folder
+png_path            = "res://assets/spritemap1.png"
+auto_play           = "walk"
 fps_override        = 0   # 0 = read FPS from JSON
 ```
 
@@ -79,81 +90,70 @@ fps_override        = 0   # 0 = read FPS from JSON
 
 ## Multiple Animations
 
-If you have several animation JSON files in one folder, point the importer at the **folder**
-instead of a single file. Each JSON becomes a separate animation in the `AnimationPlayer`,
-named after its **filename** (without extension).
+If you have several animation JSON files in one folder, point the importer at the folder instead of a single file. Each JSON becomes a separate animation in the `AnimationPlayer`, named after its filename (without extension).
 
 ```
 assets/
 ├── spritemap1.json
 ├── spritemap1.png
-├── Animation001.json       → animation "idle"
-├── Animation002.json       → animation "walk"
-└── Animation003.json        → animation "run"
+├── Animation001.json       → animation "Animation001"
+├── Animation002.json       → animation "Animation002"
+└── Animation003.json       → animation "Animation003"
 ```
 
 ```gdscript
 var ap = $AnimatedCharacter/AnimationPlayer
-ap.get_animation_list()  # ["idle", "walk", "run"]
-ap.play("walk")
+ap.get_animation_list()  # ["Animation001", "Animation002", "Animation003"]
+ap.play("Animation002")
 ```
 
 ---
 
 ## Generating a Texture Atlas in Adobe Animate
 
-This guide explains how to convert vector animations into a packed texture atlas (bitmap sheet and JSON data) for use in external game engines like Unity, Godot, or web frameworks.
-
-
----
-
-for batch export you can go here : [Batch-Export-Texture-Atlas-plugin](https://github.com/boneboxid/Batch-Export-Texture-Atlas)
-
-## Step-by-Step Instructions
+This guide explains how to convert vector animations into a packed texture atlas (bitmap sheet and JSON data) for use in external game engines like Godot.
 
 ### Step 1: Select the Animation Symbol
-1. Open your project file in **Adobe Animate**.
-2. Locate your animated character or asset.
-3. Open the **Library** panel (`Ctrl + L` on Windows or `Cmd + L` on Mac).
-4. Identify the **Movie Clip**, **Graphic**, or **Button** symbol containing the animation.
-   * *Alternative:* You can right-click the symbol instance directly on the **Stage**.
+1. Open your project file in Adobe Animate.
+2. Locate the animated character or asset in the Library (Ctrl+L / Cmd+L).
+3. Identify the Movie Clip / Graphic / Button symbol containing the animation.
 
 ### Step 2: Open the Generation Menu
-1. **Right-click** the chosen symbol in the Library or Stage.
-2. Select **Generate Texture Atlas** from the context menu to open the settings window.
+1. Right-click the symbol in the Library or Stage.
+2. Select **Generate Texture Atlas** from the context menu.
 
 ### Step 3: Configure Texture Settings
-In the **Global** tab, adjust these parameters to optimize your output:
-* **Image Dimension**: Set the maximum texture limits (e.g., `2048 x 2048`). Check **Autosize** to scale the sheet down to the minimum necessary size.
-* **Optimize Dimensions**: Enable this option to tightly crop empty pixels around each image frame.
-* **Padding**: Set a pixel spacing value (e.g., `2px`) between individual textures to avoid color bleeding.
-* **Format**: Choose **PNG 32-bit** to keep background transparency intact.
+- Image Dimension: set maximum texture limits (e.g., 2048×2048). Use Autosize to reduce unused space.
+- Optimize Dimensions: tightly crop empty pixels around each image frame.
+- Padding: add a small padding (e.g., 2px) between textures to avoid bleeding.
+- Format: choose PNG (32-bit) to preserve transparency.
 
 ### Step 4: Preview and Export
-1. Click the **Preview** tab to check the structural layout of the packed textures.
-2. Click **Browse** next to the **Output Folder** field to define your save location.
-3. Click the **Export** button to generate your files.
+1. Use the Preview tab to verify the layout.
+2. Choose an output folder and click Export. The export creates the spritesheet PNG, spritesheet JSON (atlas), and animation JSON files.
+
+For batch export, see: https://github.com/boneboxid/Batch-Export-Texture-Atlas
 
 ---
 
-## Understanding the Output Files
+## Output Files (Reference)
 
-The export process creates a single folder containing three critical files:
-
+Adobe Animate's export usually contains:
 
 | File Name | Format | Description |
-| :--- | :--- | :--- |
-| `Animation.json` | JSON | Holds the original layer structures, frame timings, and animation hierarchy data. |
-| `spritesheet.png` | PNG | The physical composite image containing all individual animation pieces. |
-| `spritesheet.json` | JSON | Stores the explicit X/Y coordinates and pixel sizes for mapping each sprite piece. |
+|-----------|--------|-------------|
+| `Animation.json` | JSON | Layer structures, frame timings, and animation hierarchy data |
+| `spritemap1.png` / `spritesheet.png` | PNG | The composite image containing all pieces |
+| `spritemap1.json` / `spritesheet.json` | JSON | X/Y coordinates and pixel sizes for each sprite |
 
-Adobe Animate will generate `spritemap1.json`, one or more `Animation.json` files, and `spritemap1.png`.
+(Your export filenames may vary; the plugin expects atlas JSON, atlas PNG, and one or more animation JSON files.)
 
 ---
 
 ## Adobe Animate JSON Structure (Reference)
 
-### spritemap1.json
+spritemap1.json example:
+
 ```json
 {
   "ATLAS": {
@@ -164,7 +164,8 @@ Adobe Animate will generate `spritemap1.json`, one or more `Animation.json` file
 }
 ```
 
-### Animation.json (summary)
+Animation.json (summary):
+
 ```json
 {
   "AN": {
@@ -197,18 +198,18 @@ Adobe Animate will generate `spritemap1.json`, one or more `Animation.json` file
 }
 ```
 
-**M3D** is a row-major 4×4 matrix. The plugin decomposes it into:
-- `position` (tx, ty from column 3)
-- `rotation` (from atan2 on the rotation components, normalized to avoid > 180° jumps between keyframes)
-- `scale` (magnitude of the row vectors, negative scale supported for flipping)
+The plugin decomposes the 4×4 row-major `M3D` matrix into:
+- position (tx, ty from column 3)
+- rotation (extracted via atan2 from rotation components, normalized to avoid >180° jumps)
+- scale (magnitude of row vectors; negative scale supported for flipping)
 
 ---
 
 ## Notes
 
-- **"CenterMarker" layers** are automatically skipped (internal Adobe Animate / EDAP Tools layer).
-- **Sub-symbols** (type `SI`) are mapped to atlas sprite names via their symbol path.
-- **Sprite instances** (type `ASI`) use the sprite name from the atlas directly.
+- `CenterMarker` layers are automatically skipped (internal Adobe Animate / EDAP Tools layer).
+- Sub-symbols (type `SI`) are mapped to atlas sprite names via their symbol path.
+- Sprite instances (type `ASI`) use the sprite name from the atlas directly.
 - `region_rect` is keyframed per frame, allowing sprites to swap textures mid-animation.
 - Rotation uses `INTERPOLATION_LINEAR_ANGLE` so Godot always picks the shortest path.
 - There are no visibility tracks — all Sprite2D nodes remain visible at all times.
@@ -217,6 +218,10 @@ Adobe Animate will generate `spritemap1.json`, one or more `Animation.json` file
 
 ## Compatibility
 
-- Godot 4.x (GDScript, `@tool`)
+- Godot 4.x (GDScript, `@tool` enabled where applicable)
 - Adobe Animate 2023+ (JSON Texture Atlas format)
 - EDAP Tools / Flash POWERTOOLS compatible
+
+---
+
+If you'd like further edits (add screenshots, example scene, or API docs), tell me what to include and I'll update the README again.
