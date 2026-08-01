@@ -117,8 +117,10 @@ This guide explains how to convert vector animations into a packed texture atlas
 ### Workflow A: Single Master File (Recommended)
 This workflow packs all animations into a single `Animation.json` file and a single spritemap. This is the most robust way because it guarantees all animations share a single, consistent texture layout.
 
-1. **Create a Master Symbol**: Create a new Empty Movie Clip or Graphic symbol in the Library (e.g., named `Character_Master`).
-2. **Nest Your Animations**: Inside this `Character_Master` symbol, create layers or keyframes and drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
+1. **Create a Master Symbol**: Create a new Empty Movie Clip symbol in the Library (e.g., named `Character_Master`).
+2. **Nest Your Animations (Level 1 Only)**: Inside this `Character_Master` symbol, create layers or keyframes and drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
+   * ⚠️ **Important (Nesting Limit)**: The importer only supports **Level 1** nesting. This means the structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nested symbols will not be imported correctly.
+   * ⚠️ **Important (MovieClip vs Graphic)**: Make sure to select **MovieClip** as the type *at the moment of creating the symbols* for both the animations and the character parts. Changing the symbol type later (e.g., via the Properties panel behavior setting) may not take effect during export. Using MovieClips ensures Adobe Animate automatically flattens all internal sprite parts during export; if you use **Graphic** symbols, Adobe Animate won't flatten them automatically, requiring you to manually merge/flatten the layers to prevent them from splitting apart.
 3. **Export Texture Atlas**: Right-click the `Character_Master` symbol in the Library and select **Generate Texture Atlas**.
 4. **Configure Settings**:
    - **Image Dimension**: Set maximum texture limits (e.g., 2048×2048). Use Autosize.
@@ -220,6 +222,7 @@ The plugin decomposes the 4×4 row-major `M3D` matrix into:
 - Rotation uses `INTERPOLATION_LINEAR_ANGLE` so Godot always picks the shortest path.
 - **Visibility Tracking**: Nodes that are inactive in a given animation are automatically hidden (`visible = false`) at `t = 0.0`.
 - **Z-Index Handling**: Active nodes have their `z_index` property keyframed at the start of each animation based on their timeline depth in the JSON (from `0` for the backmost layer to `total_layers - 1` for the frontmost).
+- **Naming Conventions**: Symbol names and character animations in Adobe Animate should **not** contain hyphens (`-`). Hyphens can cause import errors. Instead, use letters, numbers, and underscores (e.g., `boss1_attack1` instead of `boss-1_attack1`).
 
 ---
 
