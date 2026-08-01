@@ -55,21 +55,60 @@ func import_folder(atlas_json_path: String, anim_folder: String,
 
 		var fps: float = float(fps_override) if fps_override > 0 else _get_fps(anim_data)
 
-		# Build symbol map dari file ini (bisa beda tiap file)
-		_build_symbol_map(anim_data, sprites)
-
-		var parsed := _parse_animations(anim_data, fps)
-		# Override nama animasi pakai nama file supaya lebih jelas
-		var file_name = json_path.get_file().get_basename()
-		for anim in parsed:
-			anim["anim_name"] = file_name
-			all_animations.append(anim)
+		if _is_master_animation_json(anim_data):
+			# Extract in-memory
+			var part_symbols: Array = []
+			var anim_symbols: Array = []
+			for s in anim_data.get("SD", {}).get("S", []):
+				var sn: String = s.get("SN", "")
+				if sn.contains("anim"):
+					anim_symbols.append(s)
+				else:
+					part_symbols.append(s)
+			
+			for anim_sym in anim_symbols:
+				var raw_name: String = anim_sym.get("SN", "")
+				var parts_array := raw_name.split("/")
+				var anim_name: String = parts_array[parts_array.size() - 1]
+				var virtual_anim_data: Dictionary = {
+					"AN": {
+						"N": anim_data.get("AN", {}).get("N", "character"),
+						"SN": anim_name,
+						"TL": anim_sym.get("TL", {})
+					},
+					"SD": {
+						"S": part_symbols
+					}
+				}
+				_build_symbol_map(virtual_anim_data, sprites)
+				var parsed := _parse_animations(virtual_anim_data, fps)
+				for anim in parsed:
+					anim["anim_name"] = anim_name
+					all_animations.append(anim)
+		else:
+			# Normal flow for single animation file
+			_build_symbol_map(anim_data, sprites)
+			var parsed := _parse_animations(anim_data, fps)
+			var file_name = json_path.get_file().get_basename()
+			for anim in parsed:
+				anim["anim_name"] = file_name
+				all_animations.append(anim)
 
 	if all_animations.is_empty():
 		return "all file JSON failed to parse."
 
 	# 5. Build scene
 	return _build_scene(sprites, texture, all_animations, out_path)
+
+# Helper to detect if JSON is a master animation file containing nested animation symbols inside SD
+func _is_master_animation_json(data: Dictionary) -> bool:
+	if not data.has("SD") or not data["SD"].has("S"):
+		return false
+	for sym in data["SD"]["S"]:
+		var sym_name: String = sym.get("SN", "")
+		if sym_name.contains("anim"):
+			return true
+	return false
 
 # ─────────────────────────────────────────────────────────
 # Scan folder untuk semua *.json
@@ -288,6 +327,7 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 	var layer_node_map: Dictionary = {}  # key → Sprite2D
 	# Juga simpan mapping key per (afi, layer_idx) untuk lookup di Pass 2
 	var anim_layer_key: Dictionary = {}  # "afi#lidx" → node_key
+	var ordered_keys: Array[String] = []
 
 	for afi in range(all_animations.size()):
 		var anim = all_animations[afi]
@@ -304,22 +344,27 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 				names_in_anim[base_name] = true
 			anim_layer_key[str(afi) + "#" + str(layer["layer_idx"])] = node_key
 
-			if node_key in layer_node_map: continue
+			if not layer_node_map.has(node_key):
+				layer_node_map[node_key] = null
+				ordered_keys.append(node_key)
 
-			var spr := Sprite2D.new()
-			var final_name := node_key
-			# Pastikan nama node unik di scene tree
-			var counter := 2
-			while root.has_node(NodePath(final_name)):
-				final_name = node_key + str(counter)
-				counter += 1
-			spr.name = final_name
-			spr.texture = texture
-			spr.centered = false
-			spr.region_enabled = true
-			root.add_child(spr)
-			spr.owner = root
-			layer_node_map[node_key] = spr
+	# Tambahkan node ke root dalam urutan terbalik (back-to-front) agar sesuai draw order di Godot
+	for i in range(ordered_keys.size() - 1, -1, -1):
+		var node_key: String = ordered_keys[i]
+		var spr := Sprite2D.new()
+		var final_name: String = node_key
+		# Pastikan nama node unik di scene tree
+		var counter := 2
+		while root.has_node(NodePath(final_name)):
+			final_name = node_key + str(counter)
+			counter += 1
+		spr.name = final_name
+		spr.texture = texture
+		spr.centered = false
+		spr.region_enabled = true
+		root.add_child(spr)
+		spr.owner = root
+		layer_node_map[node_key] = spr
 
 	# ── Pass 2: build tiap animasi ──────────────────────────────────────────
 	for afi in range(all_animations.size()):
@@ -360,6 +405,7 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			var t_rect   := animation.add_track(Animation.TYPE_VALUE)
 			var t_offset := animation.add_track(Animation.TYPE_VALUE)
 			var t_vis    := animation.add_track(Animation.TYPE_VALUE)
+			var t_z      := animation.add_track(Animation.TYPE_VALUE)
 
 			animation.track_set_path(t_pos,    NodePath(str(npath) + ":position"))
 			animation.track_set_path(t_rot,    NodePath(str(npath) + ":rotation"))
@@ -367,11 +413,13 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			animation.track_set_path(t_rect,   NodePath(str(npath) + ":region_rect"))
 			animation.track_set_path(t_offset, NodePath(str(npath) + ":offset"))
 			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
+			animation.track_set_path(t_z,      NodePath(str(npath) + ":z_index"))
 
 			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR_ANGLE)
 			animation.track_set_interpolation_type(t_rect,   Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_offset, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis,    Animation.INTERPOLATION_NEAREST)
+			animation.track_set_interpolation_type(t_z,      Animation.INTERPOLATION_NEAREST)
 
 			# Kumpulkan keyframe dulu, normalisasi rotasi, lalu insert
 			var kf_times:  Array = []
@@ -453,6 +501,9 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 				animation.track_insert_key(t_offset, entry["t"], entry["v"])
 			for entry in kf_vis:
 				animation.track_insert_key(t_vis, entry["t"], entry["v"])
+
+			var z_val: int = anim["layers"].size() - 1 - int(layer["layer_idx"])
+			animation.track_insert_key(t_z, 0.0, z_val)
 
 		var safe_name := _sanitize_anim_name(anim["anim_name"])
 		# Hindari nama duplikat di library

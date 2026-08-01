@@ -82,7 +82,7 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 		_build_symbol_map(anim_data)
 		
 		var parsed := _parse_animations(anim_data)
-		var file_name := json_path.get_file().get_basename()
+		var file_name: String = (json_path as String).get_file().get_basename()
 		for anim in parsed:
 			anim["name"] = file_name
 			all_animations.append(anim)
@@ -162,6 +162,7 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			var trc := animation.add_track(Animation.TYPE_VALUE)
 			var to_ := animation.add_track(Animation.TYPE_VALUE)
 			var t_vis := animation.add_track(Animation.TYPE_VALUE)
+			var t_z   := animation.add_track(Animation.TYPE_VALUE)
 
 			animation.track_set_path(tp,  NodePath(str(np)+":position"))
 			animation.track_set_path(tr,  NodePath(str(np)+":rotation"))
@@ -169,11 +170,13 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			animation.track_set_path(trc, NodePath(str(np)+":region_rect"))
 			animation.track_set_path(to_, NodePath(str(np)+":offset"))
 			animation.track_set_path(t_vis, NodePath(str(np)+":visible"))
+			animation.track_set_path(t_z,   NodePath(str(np)+":z_index"))
 
 			animation.track_set_interpolation_type(tr,  Animation.INTERPOLATION_LINEAR_ANGLE)
 			animation.track_set_interpolation_type(trc, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(to_, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
+			animation.track_set_interpolation_type(t_z,   Animation.INTERPOLATION_NEAREST)
 
 			var kf_times:  Array = []
 			var kf_pos:    Array = []
@@ -249,6 +252,9 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 				animation.track_insert_key(to_, entry["t"], entry["v"])
 			for entry in kf_vis:
 				animation.track_insert_key(t_vis, entry["t"], entry["v"])
+
+			var z_val: int = anim["layers"].size() - 1 - int(layer["layer_idx"])
+			animation.track_insert_key(t_z, 0.0, z_val)
 
 		lib.add_animation(_sanim(anim["name"]), animation)
 

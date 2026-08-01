@@ -179,25 +179,26 @@ func _validate_all() -> void:
 		_png_val_lbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
 		png_ok = true
 
-	# Validate Folder & preview animations list
+	# Validate Folder/File & preview animations list
 	var folder_path := _folder_edit.text.strip_edges()
 	_update_file_list(folder_path, _file_list_lbl)
 	
-	var is_valid_folder := false
-	if not folder_path.is_empty() and DirAccess.dir_exists_absolute(
-			ProjectSettings.globalize_path(folder_path) if folder_path.begins_with("res://") else folder_path):
-		is_valid_folder = true
+	var is_valid_input := false
+	if not folder_path.is_empty():
+		var path_to_check := ProjectSettings.globalize_path(folder_path) if folder_path.begins_with("res://") else folder_path
+		if DirAccess.dir_exists_absolute(path_to_check) or FileAccess.file_exists(path_to_check):
+			is_valid_input = true
 		
-	if not is_valid_folder:
-		_folder_val_lbl.text = "❌ Folder does not exist."
+	if not is_valid_input:
+		_folder_val_lbl.text = "❌ Path does not exist."
 		_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	else:
 		var files := _get_anim_files_in_folder(folder_path)
 		if files.is_empty():
-			_folder_val_lbl.text = "⚠️ Folder exists, but no animation JSON files found."
+			_folder_val_lbl.text = "⚠️ Path exists, but no animation JSON files found."
 			_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
 		else:
-			_folder_val_lbl.text = "✅ Folder exists with %d animations." % files.size()
+			_folder_val_lbl.text = "✅ Path exists with %d animations." % files.size()
 			_folder_val_lbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
 			folder_ok = true
 
@@ -205,9 +206,17 @@ func _validate_all() -> void:
 
 func _get_anim_files_in_folder(folder: String) -> Array:
 	var result: Array = []
-	if folder.is_empty() or not DirAccess.dir_exists_absolute(
-			ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder):
+	if folder.is_empty():
 		return result
+	
+	var path_to_check := ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder
+	if FileAccess.file_exists(path_to_check) and folder.ends_with(".json"):
+		result.append(folder.get_file())
+		return result
+		
+	if not DirAccess.dir_exists_absolute(path_to_check):
+		return result
+		
 	var dir := DirAccess.open(folder)
 	if dir == null:
 		return result
@@ -225,12 +234,14 @@ func _get_anim_files_in_folder(folder: String) -> Array:
 
 func _update_file_list(folder: String, lbl: Label) -> void:
 	var files := _get_anim_files_in_folder(folder)
-	if folder.is_empty() or not DirAccess.dir_exists_absolute(
-			ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder):
-		lbl.text = "(folder not found)"
+	var path_to_check := ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder
+	var is_file := FileAccess.file_exists(path_to_check)
+	var is_dir := DirAccess.dir_exists_absolute(path_to_check)
+	if folder.is_empty() or (not is_file and not is_dir):
+		lbl.text = "(path not found)"
 		return
 	if files.is_empty():
-		lbl.text = "There is no Animation JSON in the folder."
+		lbl.text = "There is no Animation JSON in the path."
 	else:
 		lbl.text = "%d file(s) found:\n  • " % files.size() + "\n  • ".join(files)
 
@@ -276,18 +287,22 @@ func _build_dialog() -> Window:
 	_png_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	vbox.add_child(_png_val_lbl)
 
-	# ── Folder Animation JSONs ────────────────────────────
-	vbox.add_child(_label("Folder Animation JSONs (all *.json will be imported):"))
+	# ── Animation JSON File or Folder ─────────────────────
+	vbox.add_child(_label("Animation JSON File or Folder:"))
 	_folder_edit = LineEdit.new()
 	_folder_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_folder_edit.placeholder_text = "res://assets/animations/"
+	_folder_edit.placeholder_text = "res://assets/Animation.json or res://assets/animations/"
 	var row_folder := HBoxContainer.new(); vbox.add_child(row_folder)
 	row_folder.add_child(_folder_edit)
+	
+	var btn_folder_file := Button.new(); btn_folder_file.text = "Browse File"
+	row_folder.add_child(btn_folder_file)
+	
 	var btn_folder := Button.new(); btn_folder.text = "Browse Folder"
 	row_folder.add_child(btn_folder)
 	
 	_folder_val_lbl = Label.new()
-	_folder_val_lbl.text = "❌ No folder selected."
+	_folder_val_lbl.text = "❌ No file or folder selected."
 	_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	vbox.add_child(_folder_val_lbl)
 
@@ -333,6 +348,7 @@ func _build_dialog() -> Window:
 	# ── File dialogs ─────────────────────────────────────
 	var fd_atlas := _make_file_dialog(dlg, "*.json", _atlas_edit)
 	var fd_png   := _make_file_dialog(dlg, "*.png",  _png_edit)
+	var fd_anim_file := _make_file_dialog(dlg, "*.json", _folder_edit)
 
 	# Folder dialog
 	var fd_folder := FileDialog.new()
@@ -343,6 +359,7 @@ func _build_dialog() -> Window:
 	# Hubungkan browse buttons
 	_get_browse_btn(row_atlas).pressed.connect(func(): fd_atlas.popup_centered(Vector2i(700,500)))
 	_get_browse_btn(row_png).pressed.connect(func():   fd_png.popup_centered(Vector2i(700,500)))
+	btn_folder_file.pressed.connect(func(): fd_anim_file.popup_centered(Vector2i(700,500)))
 	btn_folder.pressed.connect(func(): fd_folder.popup_centered(Vector2i(700,500)))
 
 	# Load settings on start
@@ -400,13 +417,18 @@ func _build_dialog() -> Window:
 
 		_status_lbl.text = "⏳ Importing..."
 		var importer = load("res://addons/AATTAAI/importer.gd").new()
-		var err: String = importer.import_folder(atlas_path, folder_path, png_path, out_path, fps_val)
+		
+		# If folder_path is actually a single JSON file, pass it in the anim_files array override!
+		var anim_files_override := []
+		var base_folder := folder_path
+		if folder_path.ends_with(".json"):
+			anim_files_override.append(folder_path)
+			base_folder = folder_path.get_base_dir()
+
+		var err: String = importer.import_folder(atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override)
 
 		if err == "":
-			var files = importer._scan_json_files(folder_path)
-			_status_lbl.text = "✅ Done! %d animation(s) from %d file(s).\nScene: %s" % [
-				files.size(), files.size(), out_path
-			]
+			_status_lbl.text = "✅ Done! Imported animations successfully.\nScene: %s" % out_path
 			_save_settings()
 			get_editor_interface().get_resource_filesystem().scan()
 		else:
