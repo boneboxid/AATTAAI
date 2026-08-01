@@ -26,9 +26,9 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 >      - `📁 anim` (MovieClip symbols for the animation states: e.g. `idle`, `walk`, `punch`)
 >      - `📁 parts` (MovieClip symbols for the character parts)
 > 2. **Nesting Level**: Only **Level 1** nesting is supported. The structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nesting will fail to map correctly.
-> 3. **Single Layer in Master**: All animation symbols (`Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline must be placed on the **same single timeline layer** and distributed across different keyframes.
+> 3. **Single Layer in Master**: All animation symbols (`Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline must be placed on the **same single timeline layer** (placing them on different keyframes is optional but safe).
 > 4. **MovieClips ONLY**: Both the animations and character parts **must** be created as **MovieClip** symbols (select *MovieClip* at the moment of creation). Changing symbol behavior to MovieClip later in the Properties panel might not work during export.
-> 5. **No Hyphens**: Do not use hyphens (`-`) in symbol names or character actions (e.g., use `boss1_attack1` instead of `boss-1_attack1`).
+> 5. **No Hyphens or Special Symbols**: Do not use hyphens (`-`) or other special symbols in symbol names or character actions, as they can cause import errors (e.g., use `boss1_attack1` instead of `boss-1_attack1`).
 
 ---
 
@@ -147,7 +147,7 @@ This workflow packs all animations into a single `Animation.json` file and a sin
 
 1. **Create a Master Symbol**: Create a new Empty Movie Clip symbol in the Library (e.g., named `Character_Master`).
 2. **Nest Your Animations (Level 1 Only)**: Inside this `Character_Master` symbol, drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
-   * ⚠️ **Important (Single Layer Nesting)**: When placing your animations (e.g., `Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline, **make sure to place them all on the same single timeline layer**, separated across different keyframes.
+   * ⚠️ **Important (Single Layer Nesting)**: When placing your animations (e.g., `Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline, **make sure to place them all on the same single timeline layer** (separating them across different keyframes is optional but safe).
    * ⚠️ **Important (Nesting Limit)**: The importer only supports **Level 1** nesting. This means the structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nested symbols will not be imported correctly.
    * ⚠️ **Important (MovieClip vs Graphic)**: Make sure to select **MovieClip** as the type *at the moment of creating the symbols* for both the animations and the character parts. Changing the symbol type later (e.g., via the Properties panel behavior setting) may not take effect during export. Using MovieClips ensures Adobe Animate automatically flattens all internal sprite parts during export; if you use **Graphic** symbols, Adobe Animate won't flatten them automatically, requiring you to manually merge/flatten the layers to prevent them from splitting apart.
 
@@ -260,7 +260,7 @@ The plugin decomposes the 4×4 row-major `M3D` matrix into:
 - Rotation uses `INTERPOLATION_LINEAR_ANGLE` so Godot always picks the shortest path.
 - **Visibility Tracking**: Nodes that are inactive in a given animation are automatically hidden (`visible = false`) at `t = 0.0`.
 - **Z-Index Handling**: Active nodes have their `z_index` property keyframed at the start of each animation based on their timeline depth in the JSON (from `0` for the backmost layer to `total_layers - 1` for the frontmost).
-- **Naming Conventions**: Symbol names and character animations in Adobe Animate should **not** contain hyphens (`-`). Hyphens can cause import errors. Instead, use letters, numbers, and underscores (e.g., `boss1_attack1` instead of `boss-1_attack1`).
+- **Naming Conventions**: Symbol names and character animations in Adobe Animate should **not** contain hyphens (`-`) or other special symbols. These can cause import errors. Instead, use letters, numbers, and underscores (e.g., `boss1_attack1` instead of `boss-1_attack1`).
 
 ---
 
