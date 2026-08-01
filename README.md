@@ -4,6 +4,34 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 
 ---
 
+## Table of Contents
+- [Critical Adobe Animate Setup Requirements](#-critical-adobe-animate-setup-requirements)
+- [Features](#features)
+- [Adobe Animate Output Structure](#adobe-animate-output-structure)
+- [Installation](#installation)
+- [Usage — Via Editor Menu](#usage--via-editor-menu)
+- [Usage — Via Script (Runtime)](#usage--via-script-runtime)
+- [Generating a Texture Atlas in Adobe Animate](#generating-a-texture-atlas-in-adobe-animate)
+- [Notes](#notes)
+- [Compatibility](#compatibility)
+
+---
+
+> [!IMPORTANT]
+> ### ⚠️ Critical Adobe Animate Setup Requirements
+> To ensure the importer successfully parses and imports your animations without errors, you **must** follow these rules when setting up your project in Adobe Animate:
+> 
+> 1. **Required Library Folder Structure**: You must organize your Library folders exactly like this:
+>    - `📁 character_name` (e.g., `boss`)
+>      - `📁 anim` (MovieClip symbols for the animation states: e.g. `idle`, `walk`, `punch`)
+>      - `📁 parts` (MovieClip symbols for the character parts)
+> 2. **Nesting Level**: Only **Level 1** nesting is supported. The structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nesting will fail to map correctly.
+> 3. **Single Layer in Master**: All animation symbols (`Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline must be placed on the **same single timeline layer** and distributed across different keyframes.
+> 4. **MovieClips ONLY**: Both the animations and character parts **must** be created as **MovieClip** symbols (select *MovieClip* at the moment of creation). Changing symbol behavior to MovieClip later in the Properties panel might not work during export.
+> 5. **No Hyphens**: Do not use hyphens (`-`) in symbol names or character actions (e.g., use `boss1_attack1` instead of `boss-1_attack1`).
+
+---
+
 ## Features
 
 - **Dual-Mode Import**: Natively supports both multiple animation JSON files (in a folder) and a single master `Animation.json` file containing nested animation symbols (splits them automatically in-memory).
@@ -118,9 +146,19 @@ This guide explains how to convert vector animations into a packed texture atlas
 This workflow packs all animations into a single `Animation.json` file and a single spritemap. This is the most robust way because it guarantees all animations share a single, consistent texture layout.
 
 1. **Create a Master Symbol**: Create a new Empty Movie Clip symbol in the Library (e.g., named `Character_Master`).
-2. **Nest Your Animations (Level 1 Only)**: Inside this `Character_Master` symbol, create layers or keyframes and drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
+2. **Nest Your Animations (Level 1 Only)**: Inside this `Character_Master` symbol, drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
+   * ⚠️ **Important (Single Layer Nesting)**: When placing your animations (e.g., `Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline, **make sure to place them all on the same single timeline layer**, separated across different keyframes.
    * ⚠️ **Important (Nesting Limit)**: The importer only supports **Level 1** nesting. This means the structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nested symbols will not be imported correctly.
    * ⚠️ **Important (MovieClip vs Graphic)**: Make sure to select **MovieClip** as the type *at the moment of creating the symbols* for both the animations and the character parts. Changing the symbol type later (e.g., via the Properties panel behavior setting) may not take effect during export. Using MovieClips ensures Adobe Animate automatically flattens all internal sprite parts during export; if you use **Graphic** symbols, Adobe Animate won't flatten them automatically, requiring you to manually merge/flatten the layers to prevent them from splitting apart.
+
+### Required Library Folder Structure
+To ensure the importer parses and maps the symbol coordinates correctly, you **must** organize your Adobe Animate Library folders exactly like this:
+```
+📁 boss (Character Root)
+├── 📁 anim  (contains MovieClip animation states like idle, walk, punch)
+└── 📁 parts (contains MovieClip character symbol parts)
+```
+
 3. **Export Texture Atlas**: Right-click the `Character_Master` symbol in the Library and select **Generate Texture Atlas**.
 4. **Configure Settings**:
    - **Image Dimension**: Set maximum texture limits (e.g., 2048×2048). Use Autosize.
