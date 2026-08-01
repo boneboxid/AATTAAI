@@ -6,11 +6,12 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 
 ## Features
 
-- Import Adobe Animate texture atlas (spritesheet + atlas JSON) and animation JSON.
-- Build a Godot scene with one Sprite2D node per animation layer and a shared AnimationPlayer.
-- Keyframed position, rotation, scale and region_rect (texture swapping) per frame.
-- Support for multiple animations (import a folder of Animation JSON files).
-- Runtime API to build importer from code.
+- **Dual-Mode Import**: Natively supports both multiple animation JSON files (in a folder) and a single master `Animation.json` file containing nested animation symbols (splits them automatically in-memory).
+- **Correct Draw Order**: Automatically maps layers from back-to-front to match the Adobe Animate timeline draw order in Godot.
+- **Dynamic Z-Ordering**: Keyframes the `z_index` property of each active Sprite2D node at the start of each animation, ensuring the correct depth order is maintained per animation.
+- **Full Keyframe Mapping**: Keyframes position, rotation, scale, and `region_rect` (texture swapping) per frame.
+- **Shared Nodes**: Reuses Sprite2D nodes across animations with identical layer names (no duplicates).
+- **Runtime API**: Allows importing and building character scenes dynamically from code.
 
 ---
 
@@ -111,28 +112,33 @@ ap.play("Animation002")
 
 ## Generating a Texture Atlas in Adobe Animate
 
-This guide explains how to convert vector animations into a packed texture atlas (bitmap sheet and JSON data) for use in external game engines like Godot.
+This guide explains how to convert vector animations into a packed texture atlas (bitmap sheet and JSON data) for use in Godot 4 using two different workflows.
 
-### Step 1: Select the Animation Symbol
-1. Open your project file in Adobe Animate.
-2. Locate the animated character or asset in the Library (Ctrl+L / Cmd+L).
-3. Identify the Movie Clip / Graphic / Button symbol containing the animation.
+### Workflow A: Single Master File (Recommended)
+This workflow packs all animations into a single `Animation.json` file and a single spritemap. This is the most robust way because it guarantees all animations share a single, consistent texture layout.
 
-### Step 2: Open the Generation Menu
-1. Right-click the symbol in the Library or Stage.
-2. Select **Generate Texture Atlas** from the context menu.
+1. **Create a Master Symbol**: Create a new Empty Movie Clip or Graphic symbol in the Library (e.g., named `Character_Master`).
+2. **Nest Your Animations**: Inside this `Character_Master` symbol, create layers or keyframes and drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
+3. **Export Texture Atlas**: Right-click the `Character_Master` symbol in the Library and select **Generate Texture Atlas**.
+4. **Configure Settings**:
+   - **Image Dimension**: Set maximum texture limits (e.g., 2048×2048). Use Autosize.
+   - **Optimize Dimensions**: Enable to crop empty pixels around each image frame.
+   - **Padding**: Add a small padding (e.g., 2px) to avoid texture bleeding.
+   - **Format**: PNG (32-bit).
+5. **Export**: Click **Export**. This generates a single `Animation.json` containing all nested animations and a matching `spritemap1.json` + `spritemap1.png` atlas.
 
-### Step 3: Configure Texture Settings
-- Image Dimension: set maximum texture limits (e.g., 2048×2048). Use Autosize to reduce unused space.
-- Optimize Dimensions: tightly crop empty pixels around each image frame.
-- Padding: add a small padding (e.g., 2px) between textures to avoid bleeding.
-- Format: choose PNG (32-bit) to preserve transparency.
+---
 
-### Step 4: Preview and Export
-1. Use the Preview tab to verify the layout.
-2. Choose an output folder and click Export. The export creates the spritesheet PNG, spritesheet JSON (atlas), and animation JSON files.
+### Workflow B: Individual Files (Batch Export using JSFL)
+You can export animations into separate individual `.json` files (e.g., `idle.json`, `run.json`) using JSFL scripts.
 
-For batch export, see: https://github.com/boneboxid/Batch-Export-Texture-Atlas
+1. **Prepare JSFL script**: Use a script such as [Batch-Export-Texture-Atlas](https://github.com/boneboxid/Batch-Export-Texture-Atlas) to automate exporting multiple selected symbols from the Library.
+2. **Select & Run**: Select all the animation symbols in the Library, run the JSFL script, and choose an output directory.
+3. **⚠️ CRITICAL WARNING FOR INDIVIDUAL EXPORTS**: 
+   When exporting individually, **the shapes, symbols, and body parts list in the library must be exactly identical across all selected animations**. 
+   If one animation uses a part/shape that is missing, modified, or placed in a different order in another animation, Adobe Animate will generate different sprite sheet layouts for each export. If you then attempt to use a single shared `spritemap1.png` for all of them in Godot, **it will cause severe texture distortion/index shifts** (e.g., hands rendering as forearms, or heads rendering as feet). 
+   
+   If you have parts that are unique to certain animations (like open hands for a casting animation), you **must** use **Workflow A (Single Master File)** to ensure they are packed together correctly.
 
 ---
 
@@ -212,7 +218,8 @@ The plugin decomposes the 4×4 row-major `M3D` matrix into:
 - Sprite instances (type `ASI`) use the sprite name from the atlas directly.
 - `region_rect` is keyframed per frame, allowing sprites to swap textures mid-animation.
 - Rotation uses `INTERPOLATION_LINEAR_ANGLE` so Godot always picks the shortest path.
-- There are no visibility tracks — all Sprite2D nodes remain visible at all times.
+- **Visibility Tracking**: Nodes that are inactive in a given animation are automatically hidden (`visible = false`) at `t = 0.0`.
+- **Z-Index Handling**: Active nodes have their `z_index` property keyframed at the start of each animation based on their timeline depth in the JSON (from `0` for the backmost layer to `total_layers - 1` for the frontmost).
 
 ---
 
