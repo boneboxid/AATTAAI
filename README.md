@@ -63,7 +63,6 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 2. Open **Project → Project Settings → Plugins**.
 3. Enable **Adobe Animate Importer**.
 
-(You can also package and install from the Godot AssetLib if you publish there.)
 
 ---
 
