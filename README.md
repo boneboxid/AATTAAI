@@ -269,6 +269,3 @@ The plugin decomposes the 4×4 row-major `M3D` matrix into:
 - Adobe Animate 2023+ (JSON Texture Atlas format)
 - EDAP Tools / Flash POWERTOOLS compatible
 
----
-
-If you'd like further edits (add screenshots, example scene, or API docs), tell me what to include and I'll update the README again.
