@@ -93,6 +93,16 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 
 	var lib := AnimationLibrary.new()
 
+	# Load sprite script to handle Vector2 rotation blending
+	var spr_script
+	var script_path = "res://addons/AATTAAI/AATTAI_sprite.gd"
+	if ResourceLoader.exists(script_path):
+		spr_script = load(script_path)
+	else:
+		spr_script = GDScript.new()
+		spr_script.source_code = "@tool\nextends Sprite2D\n\n@export var r_vec: Vector2 = Vector2.RIGHT:\n\tset(val):\n\t\tr_vec = val\n\t\tif val != Vector2.ZERO:\n\t\t\trotation = val.angle()\n"
+		spr_script.reload()
+
 	# Create parts
 	var layer_nodes: Dictionary = {}
 	var anim_layer_key: Dictionary = {}
@@ -111,6 +121,7 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 
 			if node_key in layer_nodes: continue
 			var spr := Sprite2D.new()
+			spr.set_script(spr_script)
 			var fname := node_key; var c2 := 2
 			while has_node(NodePath(fname)):
 				fname = node_key + str(c2); c2 += 1
@@ -165,14 +176,14 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			var t_z   := animation.add_track(Animation.TYPE_VALUE)
 
 			animation.track_set_path(tp,  NodePath(str(np)+":position"))
-			animation.track_set_path(tr,  NodePath(str(np)+":rotation"))
+			animation.track_set_path(tr,  NodePath(str(np)+":r_vec"))
 			animation.track_set_path(ts,  NodePath(str(np)+":scale"))
 			animation.track_set_path(trc, NodePath(str(np)+":region_rect"))
 			animation.track_set_path(to_, NodePath(str(np)+":offset"))
 			animation.track_set_path(t_vis, NodePath(str(np)+":visible"))
 			animation.track_set_path(t_z,   NodePath(str(np)+":z_index"))
 
-			animation.track_set_interpolation_type(tr,  Animation.INTERPOLATION_LINEAR_ANGLE)
+			animation.track_set_interpolation_type(tr,  Animation.INTERPOLATION_LINEAR)
 			animation.track_set_interpolation_type(trc, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(to_, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
@@ -244,7 +255,9 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			for i in range(kf_times.size()):
 				var t = kf_times[i]
 				animation.track_insert_key(tp, t, kf_pos[i])
-				animation.track_insert_key(tr, t, kf_rot[i])
+				var angle: float = kf_rot[i]
+				var v := Vector2(cos(angle), sin(angle))
+				animation.track_insert_key(tr, t, v)
 				animation.track_insert_key(ts, t, kf_scl[i])
 			for entry in kf_rect:
 				animation.track_insert_key(trc, entry["t"], entry["v"])

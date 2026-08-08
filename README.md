@@ -40,6 +40,7 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 - **Full Keyframe Mapping**: Keyframes position, rotation, scale, and `region_rect` (texture swapping) per frame.
 - **Shared Nodes**: Reuses Sprite2D nodes across animations with identical layer names (no duplicates).
 - **Runtime API**: Allows importing and building character scenes dynamically from code.
+- **Robust AnimationTree Blending**: Uses `Vector2` direction vectors (`r_vec`) for rotation tracks instead of float angles, which natively resolves the 180-degree rotation wrapping glitch during `AnimationTree` blending.
 
 ---
 
@@ -256,7 +257,7 @@ The plugin decomposes the 4×4 row-major `M3D` matrix into:
 - Sub-symbols (type `SI`) are mapped to atlas sprite names via their symbol path.
 - Sprite instances (type `ASI`) use the sprite name from the atlas directly.
 - `region_rect` is keyframed per frame, allowing sprites to swap textures mid-animation.
-- Rotation uses `INTERPOLATION_LINEAR_ANGLE` so Godot always picks the shortest path.
+- **Vector2 Rotation Blending**: Rotation is keyframed using a helper direction vector property (`r_vec`) rather than raw angles. This allows `AnimationTree` to interpolate angles using standard linear vector blending, which natively handles shortest-path rotation and avoids the 180-degree wrap-around flip glitch. A lightweight `@tool` script (`AATTAI_sprite.gd`) is attached to child sprites to automatically translate `r_vec` back into the node's `rotation` property.
 - **Visibility Tracking**: Nodes that are inactive in a given animation are automatically hidden (`visible = false`) at `t = 0.0`.
 - **Z-Index Handling**: Active nodes have their `z_index` property keyframed at the start of each animation based on their timeline depth in the JSON (from `0` for the backmost layer to `total_layers - 1` for the frontmost).
 - **Naming Conventions**: Symbol names and character animations in Adobe Animate should **not** contain hyphens (`-`) or other special symbols. These can cause import errors. Instead, use letters, numbers, and underscores (e.g., `boss1_attack1` instead of `boss-1_attack1`).
