@@ -117,6 +117,38 @@ fps_override        = 0   # 0 = read FPS from JSON
 
 ---
 
+## Usage — With AnimationTree (BlendTree)
+
+To blend different imported animations (such as blending `idle` and `walk`, or triggering actions like `punch` and `jump`) smoothly using an `AnimationTree`, you can set up an `AnimationNodeBlendTree`:
+
+1. **Add an `AnimationTree` Node**: Add an `AnimationTree` node as a child of your imported character root node.
+2. **Assign the AnimationPlayer**: In the Inspector of the `AnimationTree`, set the **Anim Player** property to the character's `AnimationPlayer`.
+3. **Set the Tree Root**: Set the **Tree Root** property to **New AnimationNodeBlendTree** and set **Active** to `true`.
+4. **Build the BlendTree Graph**: Open the `AnimationTree` panel at the bottom of the editor and add nodes:
+   - **Animation Nodes**: Add nodes for your imported animations (e.g. `idle`, `walk`, `jump`, `punch`).
+   - **Transition Nodes**: Use `AnimationNodeTransition` to switch between states (e.g., `idle` and `walk`). Adjust their cross-fade time (e.g., `0.2s`) for smooth blending.
+   - **OneShot Nodes**: Use `AnimationNodeOneShot` for action triggers (e.g., `jump` or `punch`) over continuous animations.
+   - **Blend2 Nodes**: Use `AnimationNodeBlend2` to blend two animations together continuously by adjusting a blend parameter from `0.0` to `1.0`.
+5. **Shortest-Path Rotation Blending**: Thanks to the built-in Vector2 direction blending (`r_vec`), you can blend any of these animations at any weight (e.g. `0.5`) without experiencing any 180-degree rotation flip/glitch.
+6. **Scripting the Blending Parameters**: Update these parameters in your player controller GDScript:
+
+```gdscript
+extends CharacterBody2D
+
+@onready var anim_tree: AnimationTree = $AnimatedCharacter/AnimationTree
+
+func _physics_process(delta):
+    # Example: Blending between Idle and Walk based on velocity
+    var speed_blend = clamp(velocity.length() / max_speed, 0.0, 1.0)
+    anim_tree.set("parameters/MoveBlend/blend_amount", speed_blend)
+
+    # Example: Triggering a OneShot action like Punch
+    if Input.is_action_just_pressed("attack"):
+        anim_tree.set("parameters/PunchOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+```
+
+---
+
 ## Multiple Animations
 
 If you have several animation JSON files in one folder, point the importer at the folder instead of a single file. Each JSON becomes a separate animation in the `AnimationPlayer`, named after its filename (without extension).
