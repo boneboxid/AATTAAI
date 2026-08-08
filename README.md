@@ -64,7 +64,8 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 2. Open **Project → Project Settings → Plugins**.
 3. Enable **Adobe Animate Importer**.
 
-
+### you can watch this video for overview tutorial
+[![Watch the video](https://i.ytimg.com/an_webp/K_uXYJD_xFI/mqdefault_6s.webp?du=3000&sqp=CPbZ3tMG&rs=AOn4CLDKTNym-c1c6v9h19GRMJOis_h2cg)](https://www.youtube.com/watch?v=K_uXYJD_xFI)
 ---
 
 ## Usage — Via Editor Menu (Import to Scene File)
