@@ -308,6 +308,16 @@ func _normalize_angle_sequence(angles: Array) -> Array:
 func _build_scene(sprites: Dictionary, texture: Texture2D,
 				  all_animations: Array, out_path: String) -> String:
 
+	# Load sprite script to handle Vector2 rotation blending
+	var spr_script
+	var script_path = "res://addons/AATTAAI/AATTAI_sprite.gd"
+	if ResourceLoader.exists(script_path):
+		spr_script = load(script_path)
+	else:
+		spr_script = GDScript.new()
+		spr_script.source_code = "@tool\nextends Sprite2D\n\n@export var r_vec: Vector2 = Vector2.RIGHT:\n\tset(val):\n\t\tr_vec = val\n\t\tif val != Vector2.ZERO:\n\t\t\trotation = val.angle()\n"
+		spr_script.reload()
+
 	var root := Node2D.new()
 	root.name = "AnimatedCharacter"
 
@@ -352,6 +362,7 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 	for i in range(ordered_keys.size() - 1, -1, -1):
 		var node_key: String = ordered_keys[i]
 		var spr := Sprite2D.new()
+		spr.set_script(spr_script)
 		var final_name: String = node_key
 		# Pastikan nama node unik di scene tree
 		var counter := 2
@@ -408,14 +419,14 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			var t_z      := animation.add_track(Animation.TYPE_VALUE)
 
 			animation.track_set_path(t_pos,    NodePath(str(npath) + ":position"))
-			animation.track_set_path(t_rot,    NodePath(str(npath) + ":rotation"))
+			animation.track_set_path(t_rot,    NodePath(str(npath) + ":r_vec"))
 			animation.track_set_path(t_scl,    NodePath(str(npath) + ":scale"))
 			animation.track_set_path(t_rect,   NodePath(str(npath) + ":region_rect"))
 			animation.track_set_path(t_offset, NodePath(str(npath) + ":offset"))
 			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
 			animation.track_set_path(t_z,      NodePath(str(npath) + ":z_index"))
 
-			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR_ANGLE)
+			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR)
 			animation.track_set_interpolation_type(t_rect,   Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_offset, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis,    Animation.INTERPOLATION_NEAREST)
@@ -493,7 +504,9 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			for i in range(kf_times.size()):
 				var t = kf_times[i]
 				animation.track_insert_key(t_pos, t, kf_pos[i])
-				animation.track_insert_key(t_rot, t, kf_rot[i])
+				var angle: float = kf_rot[i]
+				var v := Vector2(cos(angle), sin(angle))
+				animation.track_insert_key(t_rot, t, v)
 				animation.track_insert_key(t_scl, t, kf_scl[i])
 			for entry in kf_rect:
 				animation.track_insert_key(t_rect, entry["t"], entry["v"])
