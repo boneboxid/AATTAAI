@@ -42,8 +42,12 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 - **Correct Draw Order**: Automatically maps layers from back-to-front to match the Adobe Animate timeline draw order in Godot.
 - **Dynamic Z-Ordering**: Keyframes the `z_index` property of each active Sprite2D node at the start of each animation, ensuring the correct depth order is maintained per animation.
 - **Shared Nodes**: Reuses Sprite2D nodes across animations with identical layer names (no duplicates).
-- **Runtime API**: Allows importing and building character scenes dynamically from code.
+- **Runtime API**: Allows importing and building character scenes dynamically from code, supporting all customization flags.
 - **Robust AnimationTree Blending**: Uses `Vector2` direction vectors (`r_vec`) for rotation tracks instead of float angles, which natively resolves the 180-degree rotation wrapping glitch during `AnimationTree` blending.
+- **Texture Filter Selection**: Exposes options for `"Nearest (Pixel Art)"` and `"Linear (Smooth)"` filtering to support different art styles natively on import.
+- **Multi-Skin / Costume Swapper**: Optionally attaches a `@tool` skin-swapper script to the root node, allowing you to swap skin textures on the fly via the Inspector in the Editor or at Runtime.
+- **Quick-Fix Pivot Wrappers**: Optionally wraps sprites in parent `Node2D` pivot nodes, allowing designers to manually adjust the local offset of any sprite part in the Godot Viewport without having their custom pivots overwritten by animation keyframes.
+- **Interactive Preview Dialog**: Adds a beautiful live preview panel inside the import dialog, featuring play/pause controls, an animation selector, a scrubbing slider, a background color picker, and full mouse viewport navigation (scroll wheel zoom, RMB/MMB drag panning, and double-click left mouse button reset).
 
 ---
 
@@ -76,34 +80,52 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 1. Open **Tools → Import Adobe Animate...**
 2. Provide paths for `spritemap1.json` (atlas JSON), the animation JSON file (or folder), and `spritemap1.png` (atlas PNG).
 3. Set the output scene path (e.g. `res://scenes/MyCharacter.tscn`).
-4. Click **Import & Generate Scene**.
+4. **Configure Options**:
+   * **Use Pivot Wrapper Nodes**: Creates an intermediate `Node2D` wrapper parent for each body part sprite node. All keyframed transforms target the parent wrapper, allowing you to freely adjust the offset position/rotation of the child `Sprite2D` node in the editor without having it overwritten by the animations.
+   * **Add Skin Swapper Script**: Attaches a `@tool` costume-swapper script to the root node, exposing a `Skin Texture` file inspector property. Simply drag a new sprite atlas texture sheet onto this property to change skins instantly in the editor or via script.
+   * **Texture Filter Mode**: Choose between `Linear (Smooth)` (for high-resolution assets) and `Nearest (Pixel Art)` (for clean, sharp pixel art).
+5. **Interactive Preview**:
+   * Once valid file paths are provided, the character will instantly load inside the right viewport container.
+   * **Play / Pause**: Click to start or pause the preview playback.
+   * **Animation Dropdown**: Select from any of the parsed animations.
+   * **Timeline Scrubber**: Drag or click the timeline slider to scrub through the animation frames (works both while playing and paused, updating the preview in real-time).
+   * **Background Color Picker**: Click the small color square next to the animation selector to change the preview background color dynamically (useful to see dark or light characters against a contrasting backdrop).
+   * **Zoom**: Scroll the **Mouse Wheel** inside the preview panel to zoom in or out.
+   * **Pan**: Click and drag with the **Right Mouse Button** or **Middle Mouse Button** to move the viewport camera.
+   * **Reset Camera**: **Double-click** with the **Left Mouse Button** to instantly center and reset the zoom.
+6. Click **Import & Generate Scene**.
 
-The generated scene structure looks like:
+The generated scene structure (with Pivot Wrappers enabled) looks like:
 
 ```text
-AnimatedCharacter (Node2D)
+AnimatedCharacter (Node2D)  ← [Skin Swapper script attached]
 ├── AnimationPlayer
-├── leg_arm (Sprite2D)      ← one node per layer
-├── right_arm (Sprite2D)
-├── head (Sprite2D)
-├── body (Sprite2D)
+├── leg_arm (Node2D, Wrapper)
+│   └── Sprite (Sprite2D)   ← [Editable offset/pivot]
+├── right_arm (Node2D, Wrapper)
+│   └── Sprite (Sprite2D)
 └── ...
 ```
 
-Shared sprites: layers with the same name across different animation files share a single `Sprite2D` node — no duplicate nodes. Layers with duplicate names within the same animation are kept separate with a `#index` suffix.
+Shared sprites: layers with the same name across different animation files share a single `Sprite2D`/Wrapper node — no duplicate nodes. Layers with duplicate names within the same animation are kept separate with a `#index` suffix.
 
 ---
 
 ## Usage — Via Script (Runtime)
 
-Attach `AATAAI_runtime.gd` to a `Node2D`, then call `build()` from `_ready()` or another initialization function:
+Attach `AATTAI_runtime.gd` to a `Node2D`, then call `build()` from `_ready()` or another initialization function. You can pass the new customization parameters to the `build` function or set them in the Inspector:
 
 ```gdscript
 func _ready():
     $MyCharacter.build(
         "res://assets/spritemap1.json",
         "res://assets/Animation.json",
-        "res://assets/spritemap1.png"
+        "res://assets/spritemap1.png",
+        0,                 # fps_override (0 = read from JSON)
+        [],                # anim_files_override (custom list of paths, or empty)
+        true,              # p_use_pivot_wrappers (Feature 3)
+        true,              # p_add_skin_swapper (Feature 7)
+        "Nearest"          # p_filter_mode (Linear or Nearest) (Feature 10)
     )
     $MyCharacter/AnimationPlayer.play("walk")
 ```
@@ -117,6 +139,9 @@ animation_json_path = "res://assets/Animation.json"  # or a folder
 png_path            = "res://assets/spritemap1.png"
 auto_play           = "walk"
 fps_override        = 0   # 0 = read FPS from JSON
+texture_filter_mode = "Linear" # or "Nearest" (Feature 10)
+use_pivot_wrappers  = true # Feature 3
+add_skin_swapper    = true # Feature 7
 ```
 
 ---
