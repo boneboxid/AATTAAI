@@ -15,9 +15,12 @@ var _symbol_map: Dictionary = {}  # "stickman/parts/arm" → {sprite, ox, oy}
 # Entry point — SINGLE file (backward compat)
 # ─────────────────────────────────────────────────────────
 func import(atlas_json_path: String, anim_json_path: String,
-			png_path: String, out_path: String, fps_override: int) -> String:
+			png_path: String, out_path: String, fps_override: int,
+			use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
+			texture_filter_mode: String = "Linear") -> String:
 	return import_folder(atlas_json_path, anim_json_path.get_base_dir(),
-						 png_path, out_path, fps_override, [anim_json_path])
+						 png_path, out_path, fps_override, [anim_json_path],
+						 use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
 
 # ─────────────────────────────────────────────────────────
 # Entry point — FOLDER (semua *.json di folder)
@@ -26,7 +29,9 @@ func import(atlas_json_path: String, anim_json_path: String,
 # ─────────────────────────────────────────────────────────
 func import_folder(atlas_json_path: String, anim_folder: String,
 				   png_path: String, out_path: String,
-				   fps_override: int, anim_files: Array = []) -> String:
+				   fps_override: int, anim_files: Array = [],
+				   use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
+				   texture_filter_mode: String = "Linear") -> String:
 
 	# 1. Atlas
 	var atlas_data = _load_json(atlas_json_path)
@@ -97,7 +102,8 @@ func import_folder(atlas_json_path: String, anim_folder: String,
 		return "all file JSON failed to parse."
 
 	# 5. Build scene
-	return _build_scene(sprites, texture, all_animations, out_path)
+	return _build_scene(sprites, texture, all_animations, out_path,
+						use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
 
 # Helper to detect if JSON is a master animation file containing nested animation symbols inside SD
 func _is_master_animation_json(data: Dictionary) -> bool:
@@ -420,8 +426,10 @@ func _normalize_angle_sequence(angles: Array) -> Array:
 # (misal "leg_arm" duplikat 4x), masing-masing harus node terpisah.
 # Shared texture atlas sudah ditangani lewat region_rect keyframe.
 # ─────────────────────────────────────────────────────────
-func _build_scene(sprites: Dictionary, texture: Texture2D,
-				  all_animations: Array, out_path: String) -> String:
+func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
+						all_animations: Array,
+						use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
+						texture_filter_mode: String = "Linear") -> Node2D:
 
 	# Load sprite script to handle Vector2 rotation blending
 	var spr_script
@@ -433,8 +441,30 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 		spr_script.source_code = "@tool\nextends Sprite2D\n\n@export var r_vec: Vector2 = Vector2.RIGHT:\n\tset(val):\n\t\tr_vec = val\n\t\tif val != Vector2.ZERO:\n\t\t\trotation = val.angle()\n"
 		spr_script.reload()
 
+	var wrapper_script
+	var wrapper_script_path = "res://addons/AATTAAI/AATTAI_wrapper.gd"
+	if ResourceLoader.exists(wrapper_script_path):
+		wrapper_script = load(wrapper_script_path)
+	else:
+		wrapper_script = GDScript.new()
+		wrapper_script.source_code = "@tool\nextends Node2D\n\n@export var r_vec: Vector2 = Vector2.RIGHT:\n\tset(val):\n\t\tr_vec = val\n\t\tif val != Vector2.ZERO:\n\t\t\trotation = val.angle()\n"
+		wrapper_script.reload()
+
 	var root := Node2D.new()
 	root.name = "AnimatedCharacter"
+
+	# Feature 10: Texture Filter
+	if texture_filter_mode == "Nearest" or texture_filter_mode == "Nearest (Pixel Art)":
+		root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	else:
+		root.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+
+	# Feature 7: Add Skin Swapper Script
+	if add_skin_swapper:
+		var scr := GDScript.new()
+		scr.source_code = "@tool\nextends Node2D\n\n@export_file(\"*.png\") var skin_texture: String = \"\":\n\tset(val):\n\t\tskin_texture = val\n\t\tif val != \"\":\n\t\t\tvar tex = load(val)\n\t\t\tif tex is Texture2D:\n\t\t\t\tchange_skin(tex)\n\nfunc change_skin(new_texture: Texture2D) -> void:\n\tfor child in get_children():\n\t\tif child is Sprite2D:\n\t\t\tchild.texture = new_texture\n\t\telif child is Node2D:\n\t\t\tfor gchild in child.get_children():\n\t\t\t\tif gchild is Sprite2D:\n\t\t\t\t\tgchild.texture = new_texture\n"
+		scr.reload()
+		root.set_script(scr)
 
 	var anim_player := AnimationPlayer.new()
 	anim_player.name = "AnimationPlayer"
@@ -449,7 +479,7 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 	# mereka share satu Sprite2D yang sama (tidak duplikat).
 	# Edge-case: layer dengan nama identik DALAM satu animasi (misal "leg" x4)
 	# tetap dipisah pakai suffix "#layer_idx".
-	var layer_node_map: Dictionary = {}  # key → Sprite2D
+	var layer_node_map: Dictionary = {}  # key → Node2D (wrapper atau Sprite2D)
 	# Juga simpan mapping key per (afi, layer_idx) untuk lookup di Pass 2
 	var anim_layer_key: Dictionary = {}  # "afi#lidx" → node_key
 	var ordered_keys: Array[String] = []
@@ -476,21 +506,41 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 	# Tambahkan node ke root dalam urutan terbalik (back-to-front) agar sesuai draw order di Godot
 	for i in range(ordered_keys.size() - 1, -1, -1):
 		var node_key: String = ordered_keys[i]
-		var spr := Sprite2D.new()
-		spr.set_script(spr_script)
-		var final_name: String = node_key
 		# Pastikan nama node unik di scene tree
+		var final_name: String = node_key
 		var counter := 2
 		while root.has_node(NodePath(final_name)):
 			final_name = node_key + str(counter)
 			counter += 1
-		spr.name = final_name
-		spr.texture = texture
-		spr.centered = false
-		spr.region_enabled = true
-		root.add_child(spr)
-		spr.owner = root
-		layer_node_map[node_key] = spr
+
+		if use_pivot_wrappers:
+			# Feature 3: Use Pivot Wrapper nodes
+			var wrapper := Node2D.new()
+			wrapper.set_script(wrapper_script)
+			wrapper.name = final_name
+			root.add_child(wrapper)
+			wrapper.owner = root
+
+			var spr := Sprite2D.new()
+			spr.name = "Sprite"
+			spr.texture = texture
+			spr.centered = false
+			spr.region_enabled = true
+			wrapper.add_child(spr)
+			spr.owner = root
+
+			layer_node_map[node_key] = wrapper
+		else:
+			var spr := Sprite2D.new()
+			spr.set_script(spr_script)
+			spr.name = final_name
+			spr.texture = texture
+			spr.centered = false
+			spr.region_enabled = true
+			root.add_child(spr)
+			spr.owner = root
+
+			layer_node_map[node_key] = spr
 
 	# ── Pass 2: build tiap animasi ──────────────────────────────────────────
 	for afi in range(all_animations.size()):
@@ -511,8 +561,8 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 		# Hide node yang tidak aktif di animasi ini di t = 0
 		for node_key in layer_node_map:
 			if not active_keys.has(node_key):
-				var node: Sprite2D = layer_node_map[node_key]
-				var npath := root.get_path_to(node)
+				var node: Node = layer_node_map[node_key]
+				var npath := node.name
 				var t_vis := animation.add_track(Animation.TYPE_VALUE)
 				animation.track_set_path(t_vis, NodePath(str(npath) + ":visible"))
 				animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
@@ -522,8 +572,8 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			var lookup := str(afi) + "#" + str(layer["layer_idx"])
 			var node_key: String = anim_layer_key.get(lookup, "")
 			if node_key == "" or not layer_node_map.has(node_key): continue
-			var node: Sprite2D = layer_node_map[node_key]
-			var npath := root.get_path_to(node)
+			var node: Node = layer_node_map[node_key]
+			var npath := node.name
 
 			var t_pos    := animation.add_track(Animation.TYPE_VALUE)
 			var t_rot    := animation.add_track(Animation.TYPE_VALUE)
@@ -533,11 +583,13 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 			var t_vis    := animation.add_track(Animation.TYPE_VALUE)
 			var t_z      := animation.add_track(Animation.TYPE_VALUE)
 
+			var sprite_path = str(npath) + "/Sprite" if use_pivot_wrappers else str(npath)
+
 			animation.track_set_path(t_pos,    NodePath(str(npath) + ":position"))
 			animation.track_set_path(t_rot,    NodePath(str(npath) + ":r_vec"))
 			animation.track_set_path(t_scl,    NodePath(str(npath) + ":scale"))
-			animation.track_set_path(t_rect,   NodePath(str(npath) + ":region_rect"))
-			animation.track_set_path(t_offset, NodePath(str(npath) + ":offset"))
+			animation.track_set_path(t_rect,   NodePath(sprite_path + ":region_rect"))
+			animation.track_set_path(t_offset, NodePath(sprite_path + ":offset"))
 			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
 			animation.track_set_path(t_z,      NodePath(str(npath) + ":z_index"))
 
@@ -699,17 +751,105 @@ func _build_scene(sprites: Dictionary, texture: Texture2D,
 	if anim_list.size() > 0:
 		anim_player.autoplay = anim_list[0]
 
-	# Save
+	return root
+
+func _build_scene(sprites: Dictionary, texture: Texture2D,
+				  all_animations: Array, out_path: String,
+				  use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
+				  texture_filter_mode: String = "Linear") -> String:
+	var root := _create_scene_tree(sprites, texture, all_animations, use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+	if root == null:
+		return "Failed to build scene tree."
+
+	var anim_player: AnimationPlayer = root.get_node("AnimationPlayer")
+	var anim_list := []
+	if anim_player and anim_player.has_animation_library(""):
+		anim_list = anim_player.get_animation_library("").get_animation_list()
+
 	var packed := PackedScene.new()
-	if packed.pack(root) != OK: return "PackedScene.pack() gagal"
+	if packed.pack(root) != OK:
+		root.queue_free()
+		return "PackedScene.pack() failed."
 	if ResourceSaver.save(packed, out_path) != OK:
+		root.queue_free()
 		return "ResourceSaver.save() failed for: " + out_path
 
+	var sprite_count = 0
+	for child in root.get_children():
+		if child is Sprite2D:
+			sprite_count += 1
+		elif child is Node2D:
+			for gc in child.get_children():
+				if gc is Sprite2D:
+					sprite_count += 1
+
+	root.queue_free()
 	print("[AATAAI] ✅ done!")
 	print("  Scene : ", out_path)
-	print("  Nodes : ", layer_node_map.size(), " Sprite2D")
+	print("  Nodes : ", sprite_count, " Sprite2D/Wrapper")
 	print("  Animation: ", anim_list)
 	return ""
+
+func import_in_memory(atlas_json_path: String, anim_folder: String,
+					  png_path: String, fps_override: int, anim_files: Array = [],
+					  use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
+					  texture_filter_mode: String = "Linear") -> Node2D:
+	var atlas_data = _load_json(atlas_json_path)
+	if atlas_data is String: return null
+	var sprites: Dictionary = _parse_atlas(atlas_data)
+	if sprites.is_empty(): return null
+
+	var texture: Texture2D = _load_texture(png_path)
+	if texture == null: return null
+
+	if anim_files.is_empty():
+		anim_files = _scan_json_files(anim_folder)
+	if anim_files.is_empty(): return null
+
+	var all_animations: Array = []
+	for json_path in anim_files:
+		var anim_data = _load_json(json_path)
+		if anim_data is String: continue
+		var fps: float = float(fps_override) if fps_override > 0 else _get_fps(anim_data)
+		if _is_master_animation_json(anim_data):
+			var part_symbols: Array = []
+			var anim_symbols: Array = []
+			for s in anim_data.get("SD", {}).get("S", []):
+				if _is_animation_symbol(s):
+					anim_symbols.append(s)
+				else:
+					part_symbols.append(s)
+			for anim_sym in anim_symbols:
+				var raw_name: String = anim_sym.get("SN", "")
+				var parts_array := raw_name.split("/")
+				var anim_name: String = parts_array[parts_array.size() - 1]
+				var virtual_anim_data: Dictionary = {
+					"AN": {
+						"N": anim_data.get("AN", {}).get("N", "character"),
+						"SN": anim_name,
+						"TL": anim_sym.get("TL", {})
+					},
+					"SD": {
+						"S": part_symbols
+					}
+				}
+				_build_symbol_map(virtual_anim_data, sprites)
+				var parsed := _parse_animations(virtual_anim_data, fps)
+				for anim in parsed:
+					anim["anim_name"] = anim_name
+					all_animations.append(anim)
+		else:
+			_build_symbol_map(anim_data, sprites)
+			var parsed := _parse_animations(anim_data, fps)
+			var file_name = json_path.get_file().get_basename()
+			for anim in parsed:
+				anim["anim_name"] = file_name
+				all_animations.append(anim)
+
+	if all_animations.is_empty(): return null
+
+	return _create_scene_tree(sprites, texture, all_animations,
+							  use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
 
 # ─────────────────────────────────────────────────────────
 # Helpers

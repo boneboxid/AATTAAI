@@ -7,6 +7,9 @@ extends Node2D
 @export_file("*.png")  var png_path: String = ""
 @export var fps_override: int = 0
 @export var auto_play: String = ""
+@export var use_pivot_wrappers: bool = true
+@export var add_skin_swapper: bool = true
+@export_enum("Linear", "Nearest") var texture_filter_mode: String = "Linear"
 
 var _sprites: Dictionary = {}
 var _symbol_map: Dictionary = {}
@@ -14,11 +17,14 @@ var _texture: Texture2D
 
 func _ready() -> void:
 	if atlas_json_path and png_path and (animation_json_path or animation_folder_path):
-		build(atlas_json_path, animation_json_path, png_path, animation_folder_path)
+		build(atlas_json_path, animation_json_path, png_path, animation_folder_path,
+			  use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
 		if auto_play != "" and has_node("AnimationPlayer"):
 			$AnimationPlayer.play(auto_play)
 
-func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder: String = "") -> void:
+func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder: String = "",
+		   p_use_pivot_wrappers: bool = true, p_add_skin_swapper: bool = true,
+		   p_texture_filter_mode: String = "Linear") -> void:
 	var atlas_data = _load_json(atlas_path)
 	if atlas_data == null:
 		push_error("[AATAIRuntime] cannot load atlas JSON")
@@ -121,6 +127,19 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 
 	var lib := AnimationLibrary.new()
 
+	# Feature 10: Texture Filter
+	if p_texture_filter_mode == "Nearest":
+		texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	else:
+		texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+
+	# Feature 7: Add Skin Swapper Script
+	if p_add_skin_swapper:
+		var scr := GDScript.new()
+		scr.source_code = "@tool\nextends Node2D\n\n@export_file(\"*.png\") var skin_texture: String = \"\":\n\tset(val):\n\t\tskin_texture = val\n\t\tif val != \"\":\n\t\t\tvar tex = load(val)\n\t\t\tif tex is Texture2D:\n\t\t\t\tchange_skin(tex)\n\nfunc change_skin(new_texture: Texture2D) -> void:\n\tfor child in get_children():\n\t\tif child is Sprite2D:\n\t\t\tchild.texture = new_texture\n\t\telif child is Node2D:\n\t\t\tfor gchild in child.get_children():\n\t\t\t\tif gchild is Sprite2D:\n\t\t\t\t\tgchild.texture = new_texture\n"
+		scr.reload()
+		set_script(scr)
+
 	# Load sprite script to handle Vector2 rotation blending
 	var spr_script
 	var script_path = "res://addons/AATTAAI/AATTAI_sprite.gd"
@@ -131,8 +150,17 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 		spr_script.source_code = "@tool\nextends Sprite2D\n\n@export var r_vec: Vector2 = Vector2.RIGHT:\n\tset(val):\n\t\tr_vec = val\n\t\tif val != Vector2.ZERO:\n\t\t\trotation = val.angle()\n"
 		spr_script.reload()
 
+	var wrapper_script
+	var wrapper_script_path = "res://addons/AATTAAI/AATTAI_wrapper.gd"
+	if ResourceLoader.exists(wrapper_script_path):
+		wrapper_script = load(wrapper_script_path)
+	else:
+		wrapper_script = GDScript.new()
+		wrapper_script.source_code = "@tool\nextends Node2D\n\n@export var r_vec: Vector2 = Vector2.RIGHT:\n\tset(val):\n\t\tr_vec = val\n\t\tif val != Vector2.ZERO:\n\t\t\trotation = val.angle()\n"
+		wrapper_script.reload()
+
 	# Create parts
-	var layer_nodes: Dictionary = {}
+	var layer_nodes: Dictionary = {} # key -> Node (wrapper Node2D or Sprite2D)
 	var anim_layer_key: Dictionary = {}
 
 	for ai in range(all_animations.size()):
@@ -148,19 +176,41 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			anim_layer_key[str(ai) + "#" + str(layer["layer_idx"])] = node_key
 
 			if node_key in layer_nodes: continue
-			var spr := Sprite2D.new()
-			spr.set_script(spr_script)
+
 			var fname := node_key; var c2 := 2
 			while has_node(NodePath(fname)):
 				fname = node_key + str(c2); c2 += 1
-			spr.name = fname
-			spr.texture = _texture
-			spr.centered = false
-			spr.region_enabled = true
-			add_child(spr)
-			if Engine.is_editor_hint():
-				spr.owner = get_tree().edited_scene_root
-			layer_nodes[node_key] = spr
+
+			if p_use_pivot_wrappers:
+				# Feature 3: Use Pivot Wrapper nodes
+				var wrapper := Node2D.new()
+				wrapper.set_script(wrapper_script)
+				wrapper.name = fname
+				add_child(wrapper)
+				if Engine.is_editor_hint() and get_tree().edited_scene_root:
+					wrapper.owner = get_tree().edited_scene_root
+
+				var spr := Sprite2D.new()
+				spr.name = "Sprite"
+				spr.texture = _texture
+				spr.centered = false
+				spr.region_enabled = true
+				wrapper.add_child(spr)
+				if Engine.is_editor_hint() and get_tree().edited_scene_root:
+					spr.owner = get_tree().edited_scene_root
+
+				layer_nodes[node_key] = wrapper
+			else:
+				var spr := Sprite2D.new()
+				spr.set_script(spr_script)
+				spr.name = fname
+				spr.texture = _texture
+				spr.centered = false
+				spr.region_enabled = true
+				add_child(spr)
+				if Engine.is_editor_hint() and get_tree().edited_scene_root:
+					spr.owner = get_tree().edited_scene_root
+				layer_nodes[node_key] = spr
 
 	# Build animations
 	for ai in range(all_animations.size()):
@@ -181,8 +231,8 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 		# Hide inactive nodes at t = 0
 		for node_key in layer_nodes:
 			if not active_keys.has(node_key):
-				var node: Sprite2D = layer_nodes[node_key]
-				var np := get_path_to(node)
+				var node: Node = layer_nodes[node_key]
+				var np := node.name
 				var t_vis := animation.add_track(Animation.TYPE_VALUE)
 				animation.track_set_path(t_vis, NodePath(str(np) + ":visible"))
 				animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
@@ -192,8 +242,8 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			var lookup := str(ai) + "#" + str(layer["layer_idx"])
 			var nk: String = anim_layer_key.get(lookup, "")
 			if nk == "" or not layer_nodes.has(nk): continue
-			var node: Sprite2D = layer_nodes[nk]
-			var np := get_path_to(node)
+			var node: Node = layer_nodes[nk]
+			var np := node.name
 
 			var tp  := animation.add_track(Animation.TYPE_VALUE)
 			var tr  := animation.add_track(Animation.TYPE_VALUE)
@@ -203,11 +253,13 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			var t_vis := animation.add_track(Animation.TYPE_VALUE)
 			var t_z   := animation.add_track(Animation.TYPE_VALUE)
 
+			var sprite_path = str(np) + "/Sprite" if p_use_pivot_wrappers else str(np)
+
 			animation.track_set_path(tp,  NodePath(str(np)+":position"))
 			animation.track_set_path(tr,  NodePath(str(np)+":r_vec"))
 			animation.track_set_path(ts,  NodePath(str(np)+":scale"))
-			animation.track_set_path(trc, NodePath(str(np)+":region_rect"))
-			animation.track_set_path(to_, NodePath(str(np)+":offset"))
+			animation.track_set_path(trc, NodePath(sprite_path+":region_rect"))
+			animation.track_set_path(to_, NodePath(sprite_path+":offset"))
 			animation.track_set_path(t_vis, NodePath(str(np)+":visible"))
 			animation.track_set_path(t_z,   NodePath(str(np)+":z_index"))
 
