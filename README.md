@@ -72,7 +72,8 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 3. Enable **Adobe Animate Importer**.
 
 ### you can watch this video for overview tutorial
-[![Watch the video](https://i.ytimg.com/an_webp/K_uXYJD_xFI/mqdefault_6s.webp?du=3000&sqp=CPbZ3tMG&rs=AOn4CLDKTNym-c1c6v9h19GRMJOis_h2cg)](https://www.youtube.com/watch?v=K_uXYJD_xFI)
+- [V1.6.0 demo](https://www.youtube.com/watch?v=K_uXYJD_xFI)
+- [V1.6.5 demo (WIP)]()
 ---
 
 ## Usage — Via Editor Menu (Import to Scene File)
@@ -176,7 +177,7 @@ func _physics_process(delta):
         anim_tree.set("parameters/PunchOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 ```
 ### you can watch this video, thanks to Gwizz
-[![Watch the video](https://i.ytimg.com/an_webp/eQUrKp19iXE/mqdefault_6s.webp?du=3000&sqp=CPDx3dMG&rs=AOn4CLCPgEzDhRCx_bhiefIWnyAutrpTdQ)](https://www.youtube.com/watch?v=eQUrKp19iXE)
+[Watch the video (Godot 4 Animation Blend Tree Tutorial Part 2 by Gwizz)](https://www.youtube.com/watch?v=eQUrKp19iXE)
 ---
 
 ## Multiple Animations
