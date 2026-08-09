@@ -35,9 +35,12 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 ## Features
 
 - **Dual-Mode Import**: Natively supports both multiple animation JSON files (in a folder) and a single master `Animation.json` file containing nested animation symbols (splits them automatically in-memory).
+- **Flexible Library Organization**: Automatically detects and splits master animations from flat parts using structural analysis (symbols with child instances `SI` vs raw sprites `ASI`) instead of requiring the string `"anim"` in Library folder names.
+- **Automatic Frame Picker & Swap Symbol Support**: Supports both swapping different Library symbols and picking specific frames within a single Graphic symbol using Adobe Animate's Frame Picker (supporting `"FF"` / `"firstFrame"` index tracking).
+- **Auto-Normalization (Optimized & Unoptimized JSON)**: Seamlessly imports both optimized (short keys) and unoptimized (verbose keys like `ANIMATION`, `SYMBOL_DICTIONARY`, `Matrix3D` dictionaries) JSON formats by normalizing them during the loading phase.
+- **Keyframe Optimization (Deduplication)**: Discards redundant baked keyframes. Stationary properties on transform tracks (`position`, `rotation`, `scale`) get only 1 keyframe at `t = 0.0` instead of baking every frame, significantly reducing scene file sizes and keeping Godot's AnimationPlayer clean. Discrete properties (`region_rect`, `offset`, `visible`) are only keyframed when they actually change.
 - **Correct Draw Order**: Automatically maps layers from back-to-front to match the Adobe Animate timeline draw order in Godot.
 - **Dynamic Z-Ordering**: Keyframes the `z_index` property of each active Sprite2D node at the start of each animation, ensuring the correct depth order is maintained per animation.
-- **Full Keyframe Mapping**: Keyframes position, rotation, scale, and `region_rect` (texture swapping) per frame.
 - **Shared Nodes**: Reuses Sprite2D nodes across animations with identical layer names (no duplicates).
 - **Runtime API**: Allows importing and building character scenes dynamically from code.
 - **Robust AnimationTree Blending**: Uses `Vector2` direction vectors (`r_vec`) for rotation tracks instead of float angles, which natively resolves the 180-degree rotation wrapping glitch during `AnimationTree` blending.
