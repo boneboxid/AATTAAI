@@ -15,6 +15,23 @@ var _atlas_val_lbl: Label
 var _folder_val_lbl: Label
 var _png_val_lbl: Label
 
+# New roadmap controls
+var _pivot_check: CheckBox
+var _swapper_check: CheckBox
+var _filter_option: OptionButton
+
+# Preview panel variables
+var _preview_viewport: SubViewport
+var _preview_node: Node2D
+var _preview_player: AnimationPlayer
+var _play_btn: Button
+var _anim_option: OptionButton
+var _scrub_slider: HSlider
+var _preview_timer: Timer
+var _is_scrubbing := false
+var _is_updating_slider := false
+var _was_playing_before_scrub := false
+
 const SETTINGS_PATH = "res://.godot/aattaai_settings.cfg"
 
 func _enter_tree() -> void:
@@ -33,7 +50,7 @@ func _on_import_menu_pressed() -> void:
 	
 	# Populate selection from FileSystem Dock before showing the window
 	_populate_from_selection()
-	_import_dialog.popup_centered(Vector2i(600, 520))
+	_import_dialog.popup_centered(Vector2i(1000, 600))
 
 func _populate_from_selection() -> void:
 	if not get_editor_interface():
@@ -118,6 +135,9 @@ func _save_settings() -> void:
 	config.set_value("settings", "png_path", _png_edit.text.strip_edges())
 	config.set_value("settings", "out_path", _out_edit.text.strip_edges())
 	config.set_value("settings", "fps_override", int(_fps_spin.value))
+	config.set_value("settings", "use_pivot", _pivot_check.button_pressed)
+	config.set_value("settings", "add_swapper", _swapper_check.button_pressed)
+	config.set_value("settings", "filter_mode", _filter_option.selected)
 	
 	var dir := DirAccess.open("res://")
 	if dir != null and not dir.dir_exists(".godot"):
@@ -130,7 +150,10 @@ func _load_settings() -> Dictionary:
 		"folder_path": "",
 		"png_path": "",
 		"out_path": "res://imported_character.tscn",
-		"fps_override": 0
+		"fps_override": 0,
+		"use_pivot": true,
+		"add_swapper": true,
+		"filter_mode": 0
 	}
 	var config := ConfigFile.new()
 	if config.load(SETTINGS_PATH) == OK:
@@ -139,6 +162,9 @@ func _load_settings() -> Dictionary:
 		res["png_path"] = config.get_value("settings", "png_path", "")
 		res["out_path"] = config.get_value("settings", "out_path", "res://imported_character.tscn")
 		res["fps_override"] = int(config.get_value("settings", "fps_override", 0))
+		res["use_pivot"] = config.get_value("settings", "use_pivot", true)
+		res["add_swapper"] = config.get_value("settings", "add_swapper", true)
+		res["filter_mode"] = config.get_value("settings", "filter_mode", 0)
 	return res
 
 func _validate_all() -> void:
@@ -150,7 +176,7 @@ func _validate_all() -> void:
 	# Validate Atlas
 	var atlas_path := _atlas_edit.text.strip_edges()
 	if atlas_path.is_empty():
-		_atlas_val_lbl.text = "❌ Path is empty."
+		_atlas_val_lbl.text = "❌ No file selected."
 		_atlas_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	elif not FileAccess.file_exists(atlas_path):
 		_atlas_val_lbl.text = "❌ File does not exist."
@@ -166,7 +192,7 @@ func _validate_all() -> void:
 	# Validate PNG
 	var png_path := _png_edit.text.strip_edges()
 	if png_path.is_empty():
-		_png_val_lbl.text = "❌ Path is empty."
+		_png_val_lbl.text = "❌ No file selected."
 		_png_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	elif not FileAccess.file_exists(png_path):
 		_png_val_lbl.text = "❌ File does not exist."
@@ -190,7 +216,7 @@ func _validate_all() -> void:
 			is_valid_input = true
 		
 	if not is_valid_input:
-		_folder_val_lbl.text = "❌ Path does not exist."
+		_folder_val_lbl.text = "❌ No file or folder selected."
 		_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	else:
 		var files := _get_anim_files_in_folder(folder_path)
@@ -203,6 +229,11 @@ func _validate_all() -> void:
 			folder_ok = true
 
 	_btn_import.disabled = not (atlas_ok and folder_ok and png_ok)
+	
+	if atlas_ok and folder_ok and png_ok:
+		_update_preview()
+	else:
+		_clear_preview()
 
 func _get_anim_files_in_folder(folder: String) -> Array:
 	var result: Array = []
@@ -245,15 +276,71 @@ func _update_file_list(folder: String, lbl: Label) -> void:
 	else:
 		lbl.text = "%d file(s) found:\n  • " % files.size() + "\n  • ".join(files)
 
+func _clear_preview() -> void:
+	if _preview_node:
+		_preview_node.queue_free()
+		_preview_node = null
+	_preview_player = null
+	if _anim_option:
+		_anim_option.clear()
+	if _play_btn:
+		_play_btn.text = "⏸️ Pause"
+
+func _update_preview() -> void:
+	_clear_preview()
+	
+	var atlas_path := _atlas_edit.text.strip_edges()
+	var folder_path := _folder_edit.text.strip_edges()
+	var png_path := _png_edit.text.strip_edges()
+	var fps_val := int(_fps_spin.value)
+	var use_pivot := _pivot_check.button_pressed
+	var add_swapper := _swapper_check.button_pressed
+	var filter_idx := _filter_option.selected
+	var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+
+	var importer = load("res://addons/AATTAAI/importer.gd").new()
+	var anim_files_override := []
+	var base_folder := folder_path
+	if folder_path.ends_with(".json"):
+		anim_files_override.append(folder_path)
+		base_folder = folder_path.get_base_dir()
+
+	var root_node = importer.import_in_memory(atlas_path, base_folder, png_path, fps_val, anim_files_override, use_pivot, add_swapper, filter_mode)
+	if root_node:
+		_preview_node = root_node
+		_preview_viewport.add_child(_preview_node)
+		_preview_node.position = Vector2(0, 0)
+		
+		if _preview_node.has_node("AnimationPlayer"):
+			_preview_player = _preview_node.get_node("AnimationPlayer")
+			var lib = _preview_player.get_animation_library("")
+			if lib:
+				var anims = lib.get_animation_list()
+				for a in anims:
+					_anim_option.add_item(a)
+				if anims.size() > 0:
+					_preview_player.play(anims[0])
+					_play_btn.text = "⏸️ Pause"
+
 func _build_dialog() -> Window:
 	var dlg := Window.new()
 	dlg.title = "Adobe Animate Importer (AATAAI)"
-	dlg.size = Vector2i(600, 520)
+	dlg.size = Vector2i(1000, 600)
 	dlg.exclusive = true
 
+	var split := HSplitContainer.new()
+	split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 12)
+	dlg.add_child(split)
+
+	# Left side: ScrollContainer containing parameters
+	var left_scroll := ScrollContainer.new()
+	left_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_child(left_scroll)
+
 	var vbox := VBoxContainer.new()
-	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 12)
-	dlg.add_child(vbox)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_scroll.add_child(vbox)
 
 	# ── Header Information ───────────────────────────────
 	var header := Label.new()
@@ -308,7 +395,7 @@ func _build_dialog() -> Window:
 
 	# ── Preview daftar file (Scrollable) ──────────────────
 	var scroll_preview := ScrollContainer.new()
-	scroll_preview.custom_minimum_size = Vector2(0, 100)
+	scroll_preview.custom_minimum_size = Vector2(0, 80)
 	scroll_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(scroll_preview)
 
@@ -333,6 +420,26 @@ func _build_dialog() -> Window:
 	_fps_spin.min_value = 0; _fps_spin.max_value = 120; _fps_spin.value = 0
 	fps_row.add_child(_fps_spin)
 
+	# ── Texture Filter dropdown (Feature 10) ─────────────
+	var filter_row := HBoxContainer.new(); vbox.add_child(filter_row)
+	filter_row.add_child(_label("Texture Filter:"))
+	_filter_option = OptionButton.new()
+	_filter_option.add_item("Linear (Smooth)", 0)
+	_filter_option.add_item("Nearest (Pixel Art)", 1)
+	_filter_option.selected = 0
+	filter_row.add_child(_filter_option)
+
+	# ── Checkboxes (Features 3 and 7) ────────────────────
+	_pivot_check = CheckBox.new()
+	_pivot_check.text = "Use Pivot Wrapper Nodes (Allows Manual Recenter)"
+	_pivot_check.button_pressed = true
+	vbox.add_child(_pivot_check)
+
+	_swapper_check = CheckBox.new()
+	_swapper_check.text = "Add Skin Swapper Script (@tool)"
+	_swapper_check.button_pressed = true
+	vbox.add_child(_swapper_check)
+
 	vbox.add_child(HSeparator.new())
 
 	# ── Status ───────────────────────────────────────────
@@ -344,6 +451,110 @@ func _build_dialog() -> Window:
 	_btn_import = Button.new()
 	_btn_import.text = "⬇️ Import & Generate Scene"
 	vbox.add_child(_btn_import)
+
+	# Right side: Interactive Viewport Preview (Feature 11)
+	var right_vbox := VBoxContainer.new()
+	right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_vbox.custom_minimum_size = Vector2(400, 0)
+	split.add_child(right_vbox)
+
+	var preview_title := Label.new()
+	preview_title.text = "🎬 Animation Preview"
+	preview_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	preview_title.add_theme_font_size_override("font_size", 14)
+	right_vbox.add_child(preview_title)
+
+	var vp_container := SubViewportContainer.new()
+	vp_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vp_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vp_container.stretch = true
+	vp_container.focus_mode = Control.FOCUS_ALL
+	right_vbox.add_child(vp_container)
+
+	_preview_viewport = SubViewport.new()
+	_preview_viewport.disable_3d = true
+	_preview_viewport.transparent_bg = false
+	_preview_viewport.world_2d = World2D.new() # isolated preview world
+	vp_container.add_child(_preview_viewport)
+
+	# Add CanvasLayer to make sure background covers entire viewport screen
+	var canvas_layer := CanvasLayer.new()
+	canvas_layer.layer = -100
+	_preview_viewport.add_child(canvas_layer)
+
+	var bg_rect := ColorRect.new()
+	bg_rect.color = Color(0.25, 0.25, 0.25, 1.0)
+	bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas_layer.add_child(bg_rect)
+
+	# Add Camera
+	var camera := Camera2D.new()
+	camera.position = Vector2(0, -100)
+	camera.zoom = Vector2(1.5, 1.5)
+	_preview_viewport.add_child(camera)
+
+	# Connect panning, zooming, and reset view
+	vp_container.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+				camera.zoom *= 1.15
+			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+				camera.zoom /= 1.15
+				if camera.zoom.x < 0.1:
+					camera.zoom = Vector2(0.1, 0.1)
+			
+			if event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
+				camera.position = Vector2(0, -100)
+				camera.zoom = Vector2(1.5, 1.5)
+		elif event is InputEventMouseMotion:
+			# Check button mask for Right or Middle mouse button drag
+			var right_pressed = (event.button_mask & MOUSE_BUTTON_MASK_RIGHT) != 0
+			var middle_pressed = (event.button_mask & MOUSE_BUTTON_MASK_MIDDLE) != 0
+			if right_pressed or middle_pressed:
+				camera.position -= event.relative / camera.zoom
+	)
+
+	# Controls HBox
+	var ctrl_row := HBoxContainer.new()
+	ctrl_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_vbox.add_child(ctrl_row)
+
+	_play_btn = Button.new()
+	_play_btn.text = "⏸️ Pause"
+	ctrl_row.add_child(_play_btn)
+
+	_anim_option = OptionButton.new()
+	_anim_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ctrl_row.add_child(_anim_option)
+
+	var bg_picker := ColorPickerButton.new()
+	bg_picker.color = Color(0.0, 0.0, 0.0)
+	bg_picker.custom_minimum_size = Vector2(40, 0)
+	bg_picker.tooltip_text = "Change preview background color"
+	ctrl_row.add_child(bg_picker)
+	bg_picker.color_changed.connect(func(new_color: Color):
+		bg_rect.color = new_color
+	)
+
+	# Scrubber HBox
+	var scrub_row := HBoxContainer.new()
+	scrub_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_vbox.add_child(scrub_row)
+
+	scrub_row.add_child(_label("Timeline:"))
+	_scrub_slider = HSlider.new()
+	_scrub_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scrub_slider.min_value = 0.0
+	_scrub_slider.max_value = 1.0
+	_scrub_slider.step = 0.001
+	scrub_row.add_child(_scrub_slider)
+
+	# Timer for scrubber update
+	_preview_timer = Timer.new()
+	_preview_timer.wait_time = 0.05
+	_preview_timer.autostart = true
+	dlg.add_child(_preview_timer)
 
 	# ── File dialogs ─────────────────────────────────────
 	var fd_atlas := _make_file_dialog(dlg, "*.json", _atlas_edit)
@@ -369,6 +580,9 @@ func _build_dialog() -> Window:
 	_png_edit.text = settings["png_path"]
 	_out_edit.text = settings["out_path"]
 	_fps_spin.value = settings["fps_override"]
+	_pivot_check.button_pressed = settings["use_pivot"]
+	_swapper_check.button_pressed = settings["add_swapper"]
+	_filter_option.selected = settings["filter_mode"]
 
 	# Connect signals for validation and prediction
 	_atlas_edit.text_changed.connect(func(t: String):
@@ -384,6 +598,11 @@ func _build_dialog() -> Window:
 	_out_edit.text_changed.connect(func(t: String):
 		_validate_all()
 	)
+	
+	# Option / Checkbox changes trigger preview refresh
+	_pivot_check.pressed.connect(_validate_all)
+	_swapper_check.pressed.connect(_validate_all)
+	_filter_option.item_selected.connect(func(idx): _validate_all())
 
 	# File Dialog selections trigger validation and prediction
 	fd_atlas.file_selected.connect(func(path: String):
@@ -400,6 +619,65 @@ func _build_dialog() -> Window:
 		_validate_all()
 	)
 
+	# Connect preview controls
+	_play_btn.pressed.connect(func():
+		if not _preview_player: return
+		if _preview_player.is_playing():
+			_preview_player.pause()
+			_play_btn.text = "▶️ Play"
+		else:
+			_preview_player.play()
+			_play_btn.text = "⏸️ Pause"
+	)
+
+	_anim_option.item_selected.connect(func(idx: int):
+		if not _preview_player: return
+		var anim_name = _anim_option.get_item_text(idx)
+		_preview_player.play(anim_name)
+		_play_btn.text = "⏸️ Pause"
+	)
+
+	_scrub_slider.drag_started.connect(func():
+		_is_scrubbing = true
+		if _preview_player:
+			_was_playing_before_scrub = _preview_player.is_playing()
+			_preview_player.pause()
+	)
+	_scrub_slider.drag_ended.connect(func(value_changed: bool):
+		_is_scrubbing = false
+		if _preview_player:
+			var anim_name = _preview_player.assigned_animation
+			if anim_name != "":
+				var length = _preview_player.get_animation(anim_name).length
+				_preview_player.seek(_scrub_slider.value * length, true)
+				_preview_player.advance(0)
+				if _was_playing_before_scrub:
+					_preview_player.play()
+					_play_btn.text = "⏸️ Pause"
+				else:
+					_play_btn.text = "▶️ Play"
+	)
+	_scrub_slider.value_changed.connect(func(val: float):
+		if _is_updating_slider: return
+		if _preview_player:
+			var anim_name = _preview_player.assigned_animation
+			if anim_name != "":
+				var length = _preview_player.get_animation(anim_name).length
+				_preview_player.seek(val * length, true)
+				_preview_player.advance(0)
+	)
+
+	_preview_timer.timeout.connect(func():
+		if _is_scrubbing or not _preview_player: return
+		var anim_name = _preview_player.assigned_animation
+		if anim_name == "": return
+		var length = _preview_player.get_animation(anim_name).length
+		if length > 0.0:
+			_is_updating_slider = true
+			_scrub_slider.value = _preview_player.current_animation_position / length
+			_is_updating_slider = false
+	)
+
 	# Run initial validation
 	_validate_all()
 
@@ -410,6 +688,10 @@ func _build_dialog() -> Window:
 		var png_path := _png_edit.text.strip_edges()
 		var out_path := _out_edit.text.strip_edges()
 		var fps_val := int(_fps_spin.value)
+		var use_pivot := _pivot_check.button_pressed
+		var add_swapper := _swapper_check.button_pressed
+		var filter_idx := _filter_option.selected
+		var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
 
 		if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or out_path.is_empty():
 			_status_lbl.text = "⚠️ Fill all fields."
@@ -425,7 +707,10 @@ func _build_dialog() -> Window:
 			anim_files_override.append(folder_path)
 			base_folder = folder_path.get_base_dir()
 
-		var err: String = importer.import_folder(atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override)
+		var err: String = importer.import_folder(
+			atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override,
+			use_pivot, add_swapper, filter_mode
+		)
 
 		if err == "":
 			_status_lbl.text = "✅ Done! Imported animations successfully.\nScene: %s" % out_path
@@ -435,7 +720,10 @@ func _build_dialog() -> Window:
 			_status_lbl.text = "❌ Error: " + err
 	)
 
-	dlg.close_requested.connect(func(): dlg.hide())
+	dlg.close_requested.connect(func(): 
+		_clear_preview()
+		dlg.hide()
+	)
 	return dlg
 
 func _label(text: String) -> Label:
