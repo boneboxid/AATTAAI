@@ -117,6 +117,8 @@ func _is_master_animation_json(data: Dictionary) -> bool:
 func _is_animation_symbol(sym_def: Dictionary) -> bool:
 	var tl = sym_def.get("TL", {})
 	for layer in tl.get("L", []):
+		if layer.get("LN", "") == "CenterMarker":
+			continue
 		for fr in layer.get("FR", []):
 			for elem in fr.get("E", []):
 				if elem.has("SI"):
@@ -308,10 +310,12 @@ func _build_symbol_map(data: Dictionary, sprites: Dictionary) -> void:
 					var sp_name := str(asi.get("N", ""))
 					if sp_name.is_empty() or not sprites.has(sp_name): continue
 					var m: Array = asi.get("M3D", [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1])
+					var dec := _decompose_m3d(m)
 					frame_map[frame_idx] = {
 						"sprite": sp_name,
-						"ox": float(m[12]),
-						"oy": float(m[13])
+						"pos": dec["pos"],
+						"rot": dec["rot"],
+						"scale": dec["scale"]
 					}
 					break
 		if not frame_map.is_empty():
@@ -526,6 +530,16 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 			spr.texture = texture
 			spr.centered = false
 			spr.region_enabled = true
+			
+			var def_info = _resolve_symbol(node_key, 0)
+			if not def_info.is_empty():
+				if def_info.has("pos"):
+					spr.position = def_info["pos"]
+					spr.rotation = def_info["rot"]
+					spr.scale = def_info["scale"]
+				else:
+					spr.offset = Vector2(def_info.get("ox", 0.0), def_info.get("oy", 0.0))
+			
 			wrapper.add_child(spr)
 			spr.owner = root
 
@@ -537,6 +551,11 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 			spr.texture = texture
 			spr.centered = false
 			spr.region_enabled = true
+			
+			var def_info = _resolve_symbol(node_key, 0)
+			if not def_info.is_empty():
+				spr.offset = def_info.get("pos", Vector2(def_info.get("ox", 0.0), def_info.get("oy", 0.0)))
+				
 			root.add_child(spr)
 			spr.owner = root
 
@@ -579,7 +598,6 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 			var t_rot    := animation.add_track(Animation.TYPE_VALUE)
 			var t_scl    := animation.add_track(Animation.TYPE_VALUE)
 			var t_rect   := animation.add_track(Animation.TYPE_VALUE)
-			var t_offset := animation.add_track(Animation.TYPE_VALUE)
 			var t_vis    := animation.add_track(Animation.TYPE_VALUE)
 			var t_z      := animation.add_track(Animation.TYPE_VALUE)
 
@@ -589,15 +607,33 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 			animation.track_set_path(t_rot,    NodePath(str(npath) + ":r_vec"))
 			animation.track_set_path(t_scl,    NodePath(str(npath) + ":scale"))
 			animation.track_set_path(t_rect,   NodePath(sprite_path + ":region_rect"))
-			animation.track_set_path(t_offset, NodePath(sprite_path + ":offset"))
 			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
 			animation.track_set_path(t_z,      NodePath(str(npath) + ":z_index"))
 
 			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR)
 			animation.track_set_interpolation_type(t_rect,   Animation.INTERPOLATION_NEAREST)
-			animation.track_set_interpolation_type(t_offset, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis,    Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_z,      Animation.INTERPOLATION_NEAREST)
+
+			var t_sprite_pos := -1
+			var t_sprite_rot := -1
+			var t_sprite_scl := -1
+			var t_offset := -1
+
+			if use_pivot_wrappers:
+				t_sprite_pos = animation.add_track(Animation.TYPE_VALUE)
+				t_sprite_rot = animation.add_track(Animation.TYPE_VALUE)
+				t_sprite_scl = animation.add_track(Animation.TYPE_VALUE)
+				animation.track_set_path(t_sprite_pos, NodePath(sprite_path + ":position"))
+				animation.track_set_path(t_sprite_rot, NodePath(sprite_path + ":rotation"))
+				animation.track_set_path(t_sprite_scl, NodePath(sprite_path + ":scale"))
+				animation.track_set_interpolation_type(t_sprite_pos, Animation.INTERPOLATION_NEAREST)
+				animation.track_set_interpolation_type(t_sprite_rot, Animation.INTERPOLATION_NEAREST)
+				animation.track_set_interpolation_type(t_sprite_scl, Animation.INTERPOLATION_NEAREST)
+			else:
+				t_offset = animation.add_track(Animation.TYPE_VALUE)
+				animation.track_set_path(t_offset, NodePath(sprite_path + ":offset"))
+				animation.track_set_interpolation_type(t_offset, Animation.INTERPOLATION_NEAREST)
 
 			# Kumpulkan keyframe dulu, normalisasi rotasi, lalu insert
 			var kf_times:  Array = []
@@ -605,6 +641,9 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 			var kf_rot:    Array = []
 			var kf_scl:    Array = []
 			var kf_rect:   Array = []
+			var kf_sprite_pos: Array = []
+			var kf_sprite_rot: Array = []
+			var kf_sprite_scl: Array = []
 			var kf_offset: Array = []
 			var kf_vis:    Array = []
 
@@ -653,8 +692,10 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 					kf_rot.append(dec["rot"])
 					kf_scl.append(dec["scale"])
 
+					var sprite_pos := Vector2.ZERO
+					var sprite_rot := 0.0
+					var sprite_scale := Vector2.ONE
 					var sprite_name := ""
-					var ox := 0.0; var oy := 0.0
 					if elem.get("type") == "sprite":
 						sprite_name = elem.get("sprite_name", "")
 					elif elem.get("type") == "symbol":
@@ -662,20 +703,30 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 						var info := _resolve_symbol(elem.get("symbol_name", ""), ff)
 						if not info.is_empty():
 							sprite_name = info["sprite"]
-							ox = info["ox"]; oy = info["oy"]
+							if info.has("pos"):
+								sprite_pos = info["pos"]
+								sprite_rot = info["rot"]
+								sprite_scale = info["scale"]
+							else:
+								sprite_pos = Vector2(info.get("ox", 0.0), info.get("oy", 0.0))
 
 					if sprite_name != "" and sprites.has(sprite_name):
 						var sp = sprites[sprite_name]
 						var current_rect := Rect2(sp["x"], sp["y"], sp["w"], sp["h"])
-						var current_offset := Vector2(ox, oy)
 						
 						if last_rect_val == null or last_rect_val != current_rect:
 							kf_rect.append({"t": time, "v": current_rect})
 							last_rect_val = current_rect
 						
-						if last_offset_val == null or last_offset_val != current_offset:
-							kf_offset.append({"t": time, "v": current_offset})
-							last_offset_val = current_offset
+						if use_pivot_wrappers:
+							kf_sprite_pos.append({"t": time, "v": sprite_pos})
+							kf_sprite_rot.append({"t": time, "v": sprite_rot})
+							kf_sprite_scl.append({"t": time, "v": sprite_scale})
+						else:
+							var current_offset := sprite_pos
+							if last_offset_val == null or last_offset_val != current_offset:
+								kf_offset.append({"t": time, "v": current_offset})
+								last_offset_val = current_offset
 
 			# Normalisasi urutan sudut sebelum insert ke track
 			kf_rot = _normalize_angle_sequence(kf_rot)
@@ -728,8 +779,16 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 
 			for entry in kf_rect:
 				animation.track_insert_key(t_rect, entry["t"], entry["v"])
-			for entry in kf_offset:
-				animation.track_insert_key(t_offset, entry["t"], entry["v"])
+			if use_pivot_wrappers:
+				for entry in kf_sprite_pos:
+					animation.track_insert_key(t_sprite_pos, entry["t"], entry["v"])
+				for entry in kf_sprite_rot:
+					animation.track_insert_key(t_sprite_rot, entry["t"], entry["v"])
+				for entry in kf_sprite_scl:
+					animation.track_insert_key(t_sprite_scl, entry["t"], entry["v"])
+			else:
+				for entry in kf_offset:
+					animation.track_insert_key(t_offset, entry["t"], entry["v"])
 			for entry in kf_vis:
 				animation.track_insert_key(t_vis, entry["t"], entry["v"])
 

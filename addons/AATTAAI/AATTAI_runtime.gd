@@ -195,6 +195,16 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 				spr.texture = _texture
 				spr.centered = false
 				spr.region_enabled = true
+				
+				var def_info = _resolve(node_key, 0)
+				if not def_info.is_empty():
+					if def_info.has("pos"):
+						spr.position = def_info["pos"]
+						spr.rotation = def_info["rot"]
+						spr.scale = def_info["scale"]
+					else:
+						spr.offset = Vector2(def_info.get("ox", 0.0), def_info.get("oy", 0.0))
+				
 				wrapper.add_child(spr)
 				if Engine.is_editor_hint() and get_tree().edited_scene_root:
 					spr.owner = get_tree().edited_scene_root
@@ -207,6 +217,11 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 				spr.texture = _texture
 				spr.centered = false
 				spr.region_enabled = true
+				
+				var def_info = _resolve(node_key, 0)
+				if not def_info.is_empty():
+					spr.offset = def_info.get("pos", Vector2(def_info.get("ox", 0.0), def_info.get("oy", 0.0)))
+					
 				add_child(spr)
 				if Engine.is_editor_hint() and get_tree().edited_scene_root:
 					spr.owner = get_tree().edited_scene_root
@@ -249,7 +264,6 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			var tr  := animation.add_track(Animation.TYPE_VALUE)
 			var ts  := animation.add_track(Animation.TYPE_VALUE)
 			var trc := animation.add_track(Animation.TYPE_VALUE)
-			var to_ := animation.add_track(Animation.TYPE_VALUE)
 			var t_vis := animation.add_track(Animation.TYPE_VALUE)
 			var t_z   := animation.add_track(Animation.TYPE_VALUE)
 
@@ -259,21 +273,42 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			animation.track_set_path(tr,  NodePath(str(np)+":r_vec"))
 			animation.track_set_path(ts,  NodePath(str(np)+":scale"))
 			animation.track_set_path(trc, NodePath(sprite_path+":region_rect"))
-			animation.track_set_path(to_, NodePath(sprite_path+":offset"))
 			animation.track_set_path(t_vis, NodePath(str(np)+":visible"))
 			animation.track_set_path(t_z,   NodePath(str(np)+":z_index"))
 
 			animation.track_set_interpolation_type(tr,  Animation.INTERPOLATION_LINEAR)
 			animation.track_set_interpolation_type(trc, Animation.INTERPOLATION_NEAREST)
-			animation.track_set_interpolation_type(to_, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_z,   Animation.INTERPOLATION_NEAREST)
+
+			var t_sprite_pos := -1
+			var t_sprite_rot := -1
+			var t_sprite_scl := -1
+			var to_ := -1
+
+			if p_use_pivot_wrappers:
+				t_sprite_pos = animation.add_track(Animation.TYPE_VALUE)
+				t_sprite_rot = animation.add_track(Animation.TYPE_VALUE)
+				t_sprite_scl = animation.add_track(Animation.TYPE_VALUE)
+				animation.track_set_path(t_sprite_pos, NodePath(sprite_path + ":position"))
+				animation.track_set_path(t_sprite_rot, NodePath(sprite_path + ":rotation"))
+				animation.track_set_path(t_sprite_scl, NodePath(sprite_path + ":scale"))
+				animation.track_set_interpolation_type(t_sprite_pos, Animation.INTERPOLATION_NEAREST)
+				animation.track_set_interpolation_type(t_sprite_rot, Animation.INTERPOLATION_NEAREST)
+				animation.track_set_interpolation_type(t_sprite_scl, Animation.INTERPOLATION_NEAREST)
+			else:
+				to_ = animation.add_track(Animation.TYPE_VALUE)
+				animation.track_set_path(to_, NodePath(sprite_path+":offset"))
+				animation.track_set_interpolation_type(to_, Animation.INTERPOLATION_NEAREST)
 
 			var kf_times:  Array = []
 			var kf_pos:    Array = []
 			var kf_rot:    Array = []
 			var kf_scl:    Array = []
 			var kf_rect:   Array = []
+			var kf_sprite_pos: Array = []
+			var kf_sprite_rot: Array = []
+			var kf_sprite_scl: Array = []
 			var kf_offset: Array = []
 			var kf_vis:    Array = []
 
@@ -321,26 +356,40 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 					kf_rot.append(d["rot"])
 					kf_scl.append(d["scale"])
 
-					var sname := ""; var ox := 0.0; var oy := 0.0
+					var sprite_pos := Vector2.ZERO
+					var sprite_rot := 0.0
+					var sprite_scale := Vector2.ONE
+					var sname := ""
 					if elem.get("type") == "sprite":
 						sname = elem.get("sprite_name", "")
 					elif elem.get("type") == "symbol":
 						var ff = elem.get("first_frame", 0)
 						var info := _resolve(elem.get("symbol_name", ""), ff)
 						if not info.is_empty():
-							sname = info["sprite"]; ox = info["ox"]; oy = info["oy"]
+							sname = info["sprite"]
+							if info.has("pos"):
+								sprite_pos = info["pos"]
+								sprite_rot = info["rot"]
+								sprite_scale = info["scale"]
+							else:
+								sprite_pos = Vector2(info.get("ox", 0.0), info.get("oy", 0.0))
 					if sname != "" and _sprites.has(sname):
 						var sp = _sprites[sname]
 						var current_rect := Rect2(sp.x, sp.y, sp.w, sp.h)
-						var current_offset := Vector2(ox, oy)
 						
 						if last_rect_val == null or last_rect_val != current_rect:
 							kf_rect.append({"t": t, "v": current_rect})
 							last_rect_val = current_rect
 						
-						if last_offset_val == null or last_offset_val != current_offset:
-							kf_offset.append({"t": t, "v": current_offset})
-							last_offset_val = current_offset
+						if p_use_pivot_wrappers:
+							kf_sprite_pos.append({"t": t, "v": sprite_pos})
+							kf_sprite_rot.append({"t": t, "v": sprite_rot})
+							kf_sprite_scl.append({"t": t, "v": sprite_scale})
+						else:
+							var current_offset := sprite_pos
+							if last_offset_val == null or last_offset_val != current_offset:
+								kf_offset.append({"t": t, "v": current_offset})
+								last_offset_val = current_offset
 
 			kf_rot = _normalize_angle_sequence(kf_rot)
 
@@ -392,8 +441,16 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 
 			for entry in kf_rect:
 				animation.track_insert_key(trc, entry["t"], entry["v"])
-			for entry in kf_offset:
-				animation.track_insert_key(to_, entry["t"], entry["v"])
+			if p_use_pivot_wrappers:
+				for entry in kf_sprite_pos:
+					animation.track_insert_key(t_sprite_pos, entry["t"], entry["v"])
+				for entry in kf_sprite_rot:
+					animation.track_insert_key(t_sprite_rot, entry["t"], entry["v"])
+				for entry in kf_sprite_scl:
+					animation.track_insert_key(t_sprite_scl, entry["t"], entry["v"])
+			else:
+				for entry in kf_offset:
+					animation.track_insert_key(to_, entry["t"], entry["v"])
 			for entry in kf_vis:
 				animation.track_insert_key(t_vis, entry["t"], entry["v"])
 
@@ -541,7 +598,13 @@ func _build_symbol_map(data: Dictionary) -> void:
 					var sp_name := str(asi.get("N",""))
 					if sp_name.is_empty() or not _sprites.has(sp_name): continue
 					var m: Array = asi.get("M3D",[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1])
-					frame_map[frame_idx] = {"sprite":sp_name,"ox":float(m[12]),"oy":float(m[13])}
+					var dec := _decompose(m)
+					frame_map[frame_idx] = {
+						"sprite": sp_name,
+						"pos": dec["pos"],
+						"rot": dec["rot"],
+						"scale": dec["scale"]
+					}
 					break
 		if not frame_map.is_empty():
 			_symbol_map[sn] = frame_map
@@ -650,6 +713,8 @@ func _is_master_animation_json(data: Dictionary) -> bool:
 func _is_animation_symbol(sym_def: Dictionary) -> bool:
 	var tl = sym_def.get("TL", {})
 	for layer in tl.get("L", []):
+		if layer.get("LN", "") == "CenterMarker":
+			continue
 		for fr in layer.get("FR", []):
 			for elem in fr.get("E", []):
 				if elem.has("SI"):
