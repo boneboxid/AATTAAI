@@ -457,7 +457,13 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			var z_val: int = anim["layers"].size() - 1 - int(layer["layer_idx"])
 			animation.track_insert_key(t_z, 0.0, z_val)
 
-		lib.add_animation(_sanim(anim["name"]), animation)
+		var safe_name := _sanim(anim["name"])
+		var final_anim_name := safe_name
+		var ac := 2
+		while lib.has_animation(final_anim_name):
+			final_anim_name = safe_name + "_" + str(ac)
+			ac += 1
+		lib.add_animation(final_anim_name, animation)
 
 	ap.add_animation_library("", lib)
 	if lib.get_animation_list().size() > 0 and auto_play.is_empty():
