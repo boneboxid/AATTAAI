@@ -25,20 +25,21 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 >    - `📁 character_name` (e.g., `boss`)
 >      - `📁 anim` (MovieClip symbols for the animation states: e.g. `idle`, `walk`, `punch`)
 >      - `📁 parts` (MovieClip symbols for the character parts)
-> 2. **Nesting Level**: Only **Level 1** nesting is supported. The structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nesting will fail to map correctly.
-> 3. **Single Layer in Master**: All animation symbols (`Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline must be placed on the **same single timeline layer** (placing them on different keyframes is optional but safe).
-> 4. **MovieClips ONLY**: Both the animations and character parts **must** be created as **MovieClip** symbols (select *MovieClip* at the moment of creation). Changing symbol behavior to MovieClip later in the Properties panel might not work during export.
-> 5. **No Hyphens or Special Symbols**: Do not use hyphens (`-`) or other special symbols in symbol names or character actions, as they can cause import errors (e.g., use `boss1_attack1` instead of `boss-1_attack1`).
+> 2. **Nesting Level**: Only **Level 1** nesting is supported. The structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deep nesting beyond this will cause errors.
+> 3. **Single Layer in Master**: All animation symbols (`Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline must be placed on the **same single timeline layer** (placing them on different layers will cause import failures).
+> 4. **MovieClips ONLY**: Both the animations and character parts **must** be created as **MovieClip** symbols (select *MovieClip* at the moment of creation). Changing symbol behavior to MovieClip later may not work as expected.
+> 5. **No Hyphens or Special Symbols in Symbol Names**: Do not use hyphens (`-`), parentheses `()`, or other special symbols in symbol names or character actions, as they can cause import errors (e.g., use `boss1_attack1` instead of `boss-1_attack(1)`).
+> 6. **No Hyphens or Parentheses in .fla Filename and Library Folder Names**: The Adobe Animate project file (`.fla`) and all Library folder names **must not contain hyphens (`-`) or parentheses (`()`)**, as these can cause path parsing and export errors (e.g., use `my_character.fla` or `MyCharacter.fla`, not `my-character.fla` or `my(character).fla`).
 
 ---
 
 ## Features
 
 - **Dual-Mode Import**: Natively supports both multiple animation JSON files (in a folder) and a single master `Animation.json` file containing nested animation symbols (splits them automatically in-memory).
-- **Flexible Library Organization**: Automatically detects and splits master animations from flat parts using structural analysis (symbols with child instances `SI` vs raw sprites `ASI`) instead of requiring the string `"anim"` in Library folder names.
-- **Automatic Frame Picker & Swap Symbol Support**: Supports both swapping different Library symbols and picking specific frames within a single Graphic symbol using Adobe Animate's Frame Picker (supporting `"FF"` / `"firstFrame"` index tracking).
-- **Auto-Normalization (Optimized & Unoptimized JSON)**: Seamlessly imports both optimized (short keys) and unoptimized (verbose keys like `ANIMATION`, `SYMBOL_DICTIONARY`, `Matrix3D` dictionaries) JSON formats by normalizing them during the loading phase.
-- **Keyframe Optimization (Deduplication)**: Discards redundant baked keyframes. Stationary properties on transform tracks (`position`, `rotation`, `scale`) get only 1 keyframe at `t = 0.0` instead of baking every frame, significantly reducing scene file sizes and keeping Godot's AnimationPlayer clean. Discrete properties (`region_rect`, `offset`, `visible`) are only keyframed when they actually change.
+- **Flexible Library Organization**: Automatically detects and splits master animations from flat parts using structural analysis (symbols with child instances `SI` vs raw sprites `ASI`) instead of requiring folder naming conventions.
+- **Automatic Frame Picker & Swap Symbol Support**: Supports both swapping different Library symbols and picking specific frames within a single Graphic symbol using Adobe Animate's Frame Picker (supports `PICK`).
+- **Auto-Normalization (Optimized & Unoptimized JSON)**: Seamlessly imports both optimized (short keys) and unoptimized (verbose keys like `ANIMATION`, `SYMBOL_DICTIONARY`, `Matrix3D` dictionaries) JSON exports.
+- **Keyframe Optimization (Deduplication)**: Discards redundant baked keyframes. Stationary properties on transform tracks (`position`, `rotation`, `scale`) get only 1 keyframe at `t = 0.0` instead of duplicated every frame.
 - **Correct Draw Order**: Automatically maps layers from back-to-front to match the Adobe Animate timeline draw order in Godot.
 - **Dynamic Z-Ordering**: Keyframes the `z_index` property of each active Sprite2D node at the start of each animation, ensuring the correct depth order is maintained per animation.
 - **Shared Nodes**: Reuses Sprite2D nodes across animations with identical layer names (no duplicates).
@@ -46,8 +47,8 @@ A Godot 4 plugin for importing texture atlases and animations exported from Adob
 - **Robust AnimationTree Blending**: Uses `Vector2` direction vectors (`r_vec`) for rotation tracks instead of float angles, which natively resolves the 180-degree rotation wrapping glitch during `AnimationTree` blending.
 - **Texture Filter Selection**: Exposes options for `"Nearest (Pixel Art)"` and `"Linear (Smooth)"` filtering to support different art styles natively on import.
 - **Multi-Skin / Costume Swapper**: Optionally attaches a `@tool` skin-swapper script to the root node, allowing you to swap skin textures on the fly via the Inspector in the Editor or at Runtime.
-- **Quick-Fix Pivot Wrappers**: Optionally wraps sprites in parent `Node2D` pivot nodes, allowing designers to manually adjust the local offset of any sprite part in the Godot Viewport without having their custom pivots overwritten by animation keyframes.
-- **Interactive Preview Dialog**: Adds a beautiful live preview panel inside the import dialog, featuring play/pause controls, an animation selector, a scrubbing slider, a background color picker, and full mouse viewport navigation (scroll wheel zoom, RMB/MMB drag panning, and double-click left mouse button reset).
+- **Quick-Fix Pivot Wrappers**: Optionally wraps sprites in parent `Node2D` pivot nodes, allowing designers to manually adjust the local offset of any sprite part in the Godot Viewport without having to edit the importer settings.
+- **Interactive Preview Dialog**: Adds a beautiful live preview panel inside the import dialog, featuring play/pause controls, an animation selector, a scrubbing slider, a background color picker, and zoom/pan controls.
 
 ---
 
@@ -82,15 +83,15 @@ Multiple animation JSON files can live in the same folder — the plugin will pi
 2. Provide paths for `spritemap1.json` (atlas JSON), the animation JSON file (or folder), and `spritemap1.png` (atlas PNG).
 3. Set the output scene path (e.g. `res://scenes/MyCharacter.tscn`).
 4. **Configure Options**:
-   * **Use Pivot Wrapper Nodes**: Creates an intermediate `Node2D` wrapper parent for each body part sprite node. All keyframed transforms target the parent wrapper, allowing you to freely adjust the offset position/rotation of the child `Sprite2D` node in the editor without having it overwritten by the animations.
-   * **Add Skin Swapper Script**: Attaches a `@tool` costume-swapper script to the root node, exposing a `Skin Texture` file inspector property. Simply drag a new sprite atlas texture sheet onto this property to change skins instantly in the editor or via script.
+   * **Use Pivot Wrapper Nodes**: Creates an intermediate `Node2D` wrapper parent for each body part sprite node. All keyframed transforms target the parent wrapper, allowing you to freely adjust the local pivot/offset of each part in the viewport without editing the importer settings.
+   * **Add Skin Swapper Script**: Attaches a `@tool` costume-swapper script to the root node, exposing a `Skin Texture` file inspector property. Simply drag a new sprite atlas texture sheet onto this field to swap all sprites to the new texture.
    * **Texture Filter Mode**: Choose between `Linear (Smooth)` (for high-resolution assets) and `Nearest (Pixel Art)` (for clean, sharp pixel art).
 5. **Interactive Preview**:
    * Once valid file paths are provided, the character will instantly load inside the right viewport container.
    * **Play / Pause**: Click to start or pause the preview playback.
    * **Animation Dropdown**: Select from any of the parsed animations.
    * **Timeline Scrubber**: Drag or click the timeline slider to scrub through the animation frames (works both while playing and paused, updating the preview in real-time).
-   * **Background Color Picker**: Click the small color square next to the animation selector to change the preview background color dynamically (useful to see dark or light characters against a contrasting backdrop).
+   * **Background Color Picker**: Click the small color square next to the animation selector to change the preview background color dynamically (useful to see dark or light characters against a contrasting background).
    * **Zoom**: Scroll the **Mouse Wheel** inside the preview panel to zoom in or out.
    * **Pan**: Click and drag with the **Right Mouse Button** or **Middle Mouse Button** to move the viewport camera.
    * **Reset Camera**: **Double-click** with the **Left Mouse Button** to instantly center and reset the zoom.
@@ -108,13 +109,13 @@ AnimatedCharacter (Node2D)  ← [Skin Swapper script attached]
 └── ...
 ```
 
-Shared sprites: layers with the same name across different animation files share a single `Sprite2D`/Wrapper node — no duplicate nodes. Layers with duplicate names within the same animation are kept separate with a `#index` suffix.
+Shared sprites: layers with the same name across different animation files share a single `Sprite2D`/Wrapper node — no duplicate nodes. Layers with duplicate names within the same animation are kept separate.
 
 ---
 
 ## Usage — Via Script (Runtime)
 
-Attach `AATTAI_runtime.gd` to a `Node2D`, then call `build()` from `_ready()` or another initialization function. You can pass the new customization parameters to the `build` function or set them in the Inspector:
+Attach `AATTAI_runtime.gd` to a `Node2D`, then call `build()` from `_ready()` or another initialization function. You can pass the new customization parameters to the `build` function or set them in the Inspector on the node before calling `build()`.
 
 ```gdscript
 func _ready():
@@ -149,7 +150,7 @@ add_skin_swapper    = true # Feature 7
 
 ## Usage — With AnimationTree (BlendTree)
 
-To blend different imported animations (such as blending `idle` and `walk`, or triggering actions like `punch` and `jump`) smoothly using an `AnimationTree`, you can set up an `AnimationNodeBlendTree`:
+To blend different imported animations (such as blending `idle` and `walk`, or triggering actions like `punch` and `jump`) smoothly using an `AnimationTree`, you can set up an `AnimationNodeBlendTree` as follows:
 
 1. **Add an `AnimationTree` Node**: Add an `AnimationTree` node as a child of your imported character root node.
 2. **Assign the AnimationPlayer**: In the Inspector of the `AnimationTree`, set the **Anim Player** property to the character's `AnimationPlayer`.
@@ -159,7 +160,7 @@ To blend different imported animations (such as blending `idle` and `walk`, or t
    - **Transition Nodes**: Use `AnimationNodeTransition` to switch between states (e.g., `idle` and `walk`). Adjust their cross-fade time (e.g., `0.2s`) for smooth blending.
    - **OneShot Nodes**: Use `AnimationNodeOneShot` for action triggers (e.g., `jump` or `punch`) over continuous animations.
    - **Blend2 Nodes**: Use `AnimationNodeBlend2` to blend two animations together continuously by adjusting a blend parameter from `0.0` to `1.0`.
-5. **Shortest-Path Rotation Blending**: Thanks to the built-in Vector2 direction blending (`r_vec`), you can blend any of these animations at any weight (e.g. `0.5`) without experiencing any 180-degree rotation flip/glitch.
+5. **Shortest-Path Rotation Blending**: Thanks to the built-in Vector2 direction blending (`r_vec`), you can blend any of these animations at any weight (e.g. `0.5`) without experiencing any 180-degree rotation flip.
 6. **Scripting the Blending Parameters**: Update these parameters in your player controller GDScript:
 
 ```gdscript
@@ -182,7 +183,7 @@ func _physics_process(delta):
 
 ## Multiple Animations
 
-If you have several animation JSON files in one folder, point the importer at the folder instead of a single file. Each JSON becomes a separate animation in the `AnimationPlayer`, named after its filename (without extension).
+If you have several animation JSON files in one folder, point the importer at the folder instead of a single file. Each JSON becomes a separate animation in the `AnimationPlayer`, named after its filename.
 
 ```
 assets/
@@ -210,9 +211,9 @@ This workflow packs all animations into a single `Animation.json` file and a sin
 
 1. **Create a Master Symbol**: Create a new Empty Movie Clip symbol in the Library (e.g., named `Character_Master`).
 2. **Nest Your Animations (Level 1 Only)**: Inside this `Character_Master` symbol, drag-and-drop instances of all your individual animation symbols (e.g., `Idle`, `Walk`, `Jump`, `Punch`) onto the stage.
-   * ⚠️ **Important (Single Layer Nesting)**: When placing your animations (e.g., `Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline, **make sure to place them all on the same single timeline layer** (separating them across different keyframes is optional but safe).
-   * ⚠️ **Important (Nesting Limit)**: The importer only supports **Level 1** nesting. This means the structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Any deeper nested symbols will not be imported correctly.
-   * ⚠️ **Important (MovieClip vs Graphic)**: Make sure to select **MovieClip** as the type *at the moment of creating the symbols* for both the animations and the character parts. Changing the symbol type later (e.g., via the Properties panel behavior setting) may not take effect during export. Using MovieClips ensures Adobe Animate automatically flattens all internal sprite parts during export; if you use **Graphic** symbols, Adobe Animate won't flatten them automatically, requiring you to manually merge/flatten the layers to prevent them from splitting apart.
+   * ⚠️ **Important (Single Layer Nesting)**: When placing your animations (e.g., `Idle`, `Walk`, `Punch`) inside the `Character_Master` timeline, **make sure to place them all on the same single timeline layer**. Placing them on different layers will cause the export to fail or generate incorrect data.
+   * ⚠️ **Important (Nesting Limit)**: The importer only supports **Level 1** nesting. This means the structure must be: `Character_Master` (Master) ➔ `Idle/Walk/etc` (Animations) ➔ `Character Symbol Parts` (Flat sprites). Deeper nesting will be ignored or cause errors.
+   * ⚠️ **Important (MovieClip vs Graphic)**: Make sure to select **MovieClip** as the type *at the moment of creating the symbols* for both the animations and the character parts. Changing the symbol type to MovieClip after creation may not work correctly.
 
 ### Required Library Folder Structure
 To ensure the importer parses and maps the symbol coordinates correctly, you **must** organize your Adobe Animate Library folders exactly like this:
@@ -239,7 +240,7 @@ You can export animations into separate individual `.json` files (e.g., `idle.js
 2. **Select & Run**: Select all the animation symbols in the Library, run the JSFL script, and choose an output directory.
 3. **⚠️ CRITICAL WARNING FOR INDIVIDUAL EXPORTS**: 
    When exporting individually, **the shapes, symbols, and body parts list in the library must be exactly identical across all selected animations**. 
-   If one animation uses a part/shape that is missing, modified, or placed in a different order in another animation, Adobe Animate will generate different sprite sheet layouts for each export. If you then attempt to use a single shared `spritemap1.png` for all of them in Godot, **it will cause severe texture distortion/index shifts** (e.g., hands rendering as forearms, or heads rendering as feet). 
+   If one animation uses a part/shape that is missing, modified, or placed in a different order in another animation, Adobe Animate will generate different sprite sheet layouts for each export. If you export them this way, the Godot importer will fail or generate broken animations because the texture coordinates won't align.
    
    If you have parts that are unique to certain animations (like open hands for a casting animation), you **must** use **Workflow A (Single Master File)** to ensure they are packed together correctly.
 
@@ -320,10 +321,10 @@ The plugin decomposes the 4×4 row-major `M3D` matrix into:
 - Sub-symbols (type `SI`) are mapped to atlas sprite names via their symbol path.
 - Sprite instances (type `ASI`) use the sprite name from the atlas directly.
 - `region_rect` is keyframed per frame, allowing sprites to swap textures mid-animation.
-- **Vector2 Rotation Blending**: Rotation is keyframed using a helper direction vector property (`r_vec`) rather than raw angles. This allows `AnimationTree` to interpolate angles using standard linear vector blending, which natively handles shortest-path rotation and avoids the 180-degree wrap-around flip glitch. A lightweight `@tool` script (`AATTAI_sprite.gd`) is attached to child sprites to automatically translate `r_vec` back into the node's `rotation` property.
+- **Vector2 Rotation Blending**: Rotation is keyframed using a helper direction vector property (`r_vec`) rather than raw angles. This allows `AnimationTree` to interpolate angles using standard linear blending without encountering 180-degree rotation flips.
 - **Visibility Tracking**: Nodes that are inactive in a given animation are automatically hidden (`visible = false`) at `t = 0.0`.
 - **Z-Index Handling**: Active nodes have their `z_index` property keyframed at the start of each animation based on their timeline depth in the JSON (from `0` for the backmost layer to `total_layers - 1` for the frontmost).
-- **Naming Conventions**: Symbol names and character animations in Adobe Animate should **not** contain hyphens (`-`) or other special symbols. These can cause import errors. Instead, use letters, numbers, and underscores (e.g., `boss1_attack1` instead of `boss-1_attack1`).
+- **Naming Conventions**: Symbol names and character animations in Adobe Animate should **not** contain hyphens (`-`) or other special symbols. These can cause import errors. Instead, use letters, numbers, and underscores (e.g., `attack_1` instead of `attack-1`).
 
 ---
 
