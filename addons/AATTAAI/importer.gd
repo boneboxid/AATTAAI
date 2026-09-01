@@ -463,12 +463,17 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 	else:
 		root.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 
-	# Feature 7: Add Skin Swapper Script
+	# Feature 7: Add Visual Controller & Skin Swapper Script
 	if add_skin_swapper:
-		var scr := GDScript.new()
-		scr.source_code = "@tool\nextends Node2D\n\n@export_file(\"*.png\") var skin_texture: String = \"\":\n\tset(val):\n\t\tskin_texture = val\n\t\tif val != \"\":\n\t\t\tvar tex = load(val)\n\t\t\tif tex is Texture2D:\n\t\t\t\tchange_skin(tex)\n\nfunc change_skin(new_texture: Texture2D) -> void:\n\tfor child in get_children():\n\t\tif child is Sprite2D:\n\t\t\tchild.texture = new_texture\n\t\telif child is Node2D:\n\t\t\tfor gchild in child.get_children():\n\t\t\t\tif gchild is Sprite2D:\n\t\t\t\t\tgchild.texture = new_texture\n"
-		scr.reload()
-		root.set_script(scr)
+		var controller_script
+		var controller_path = "res://addons/AATTAAI/AATTAI_controller.gd"
+		if ResourceLoader.exists(controller_path):
+			controller_script = load(controller_path)
+		else:
+			controller_script = GDScript.new()
+			controller_script.source_code = "@tool\nextends Node2D\n\n@export_file(\"*.png\") var skin_texture: String = \"\":\n\tset(val):\n\t\tskin_texture = val\n\t\tif val != \"\":\n\t\t\tvar tex: Texture2D = null\n\t\t\tif ResourceLoader.exists(val):\n\t\t\t\ttex = ResourceLoader.load(val) as Texture2D\n\t\t\telif FileAccess.file_exists(val):\n\t\t\t\tvar img := Image.new()\n\t\t\t\tif img.load(val) == OK:\n\t\t\t\t\ttex = ImageTexture.create_from_image(img)\n\t\t\tif tex is Texture2D:\n\t\t\t\tchange_skin(tex)\n\nfunc change_skin(new_texture: Texture2D) -> void:\n\tif new_texture == null:\n\t\treturn\n\t_apply_skin_recursive(self, new_texture)\n\nfunc _apply_skin_recursive(node: Node, new_texture: Texture2D) -> void:\n\tfor child in node.get_children():\n\t\tif child is Sprite2D:\n\t\t\tchild.texture = new_texture\n\t\tif child.get_child_count() > 0:\n\t\t\t_apply_skin_recursive(child, new_texture)\n"
+			controller_script.reload()
+		root.set_script(controller_script)
 
 	var anim_player := AnimationPlayer.new()
 	anim_player.name = "AnimationPlayer"
