@@ -1,33 +1,87 @@
 @tool
 extends EditorPlugin
 
+# Inner class for rendering the coordinate & floor grid in preview viewport
+class AATTAIPreviewGrid extends Node2D:
+	var show_grid: bool = true:
+		set(v):
+			show_grid = v
+			queue_redraw()
+	var grid_size: int = 64
+	var grid_color: Color = Color(1.0, 1.0, 1.0, 0.08)
+	var sub_grid_color: Color = Color(1.0, 1.0, 1.0, 0.03)
+	var axis_color_x: Color = Color(0.9, 0.35, 0.35, 0.65) # Red Floor (X Axis)
+	var axis_color_y: Color = Color(0.35, 0.85, 0.35, 0.65) # Green Center (Y Axis)
+
+	func _draw() -> void:
+		if not show_grid: return
+		var extent := 4000.0
+		var half_grid := grid_size / 2
+		
+		# Sub-grid lines (32px)
+		var sub_count := int(extent / half_grid)
+		for i in range(-sub_count, sub_count + 1):
+			var pos := float(i * half_grid)
+			if int(pos) % grid_size == 0: continue
+			draw_line(Vector2(-extent, pos), Vector2(extent, pos), sub_grid_color, 1.0)
+			draw_line(Vector2(pos, -extent), Vector2(pos, extent), sub_grid_color, 1.0)
+			
+		# Main grid lines (64px)
+		var count := int(extent / grid_size)
+		for i in range(-count, count + 1):
+			var pos := float(i * grid_size)
+			if pos == 0.0: continue
+			draw_line(Vector2(-extent, pos), Vector2(extent, pos), grid_color, 1.0)
+			draw_line(Vector2(pos, -extent), Vector2(pos, extent), grid_color, 1.0)
+		
+		# Origin Axes
+		draw_line(Vector2(-extent, 0), Vector2(extent, 0), axis_color_x, 1.5)
+		draw_line(Vector2(0, -extent), Vector2(0, extent), axis_color_y, 1.5)
+		
+		# Origin Pivot Marker
+		draw_circle(Vector2.ZERO, 3.5, Color(1.0, 1.0, 1.0, 0.9))
+		draw_arc(Vector2.ZERO, 6.0, 0, TAU, 16, Color(1.0, 0.8, 0.2, 0.8), 1.2)
+
 var _import_dialog: Window
 var _atlas_edit: LineEdit
 var _folder_edit: LineEdit
 var _png_edit: LineEdit
 var _out_edit: LineEdit
 var _fps_spin: SpinBox
-var _file_list_lbl: Label
 var _status_lbl: Label
 var _btn_import: Button
+var _btn_update: Button
 
 var _atlas_val_lbl: Label
 var _folder_val_lbl: Label
 var _png_val_lbl: Label
 
-# New roadmap controls
+# Animation Checklist & Search Controls
+var _anim_title_lbl: Label
+var _anim_search_edit: LineEdit
+var _anim_container: GridContainer
+var _anim_checkboxes: Dictionary = {}
+var _btn_select_all: Button
+var _btn_deselect_all: Button
+var _btn_select_filtered: Button
+var _last_scanned_folder: String = ""
+
+# Controls
 var _pivot_check: CheckBox
 var _swapper_check: CheckBox
 var _filter_option: OptionButton
 
 # Preview panel variables
 var _preview_viewport: SubViewport
+var _preview_grid: Node2D
+var _grid_btn: Button
 var _preview_node: Node2D
 var _preview_player: AnimationPlayer
 var _play_btn: Button
 var _anim_option: OptionButton
 var _scrub_slider: HSlider
 var _preview_timer: Timer
+var _preview_debounce_timer: Timer
 var _is_scrubbing := false
 var _is_updating_slider := false
 var _was_playing_before_scrub := false
@@ -48,9 +102,10 @@ func _on_import_menu_pressed() -> void:
 		_import_dialog = _build_dialog()
 		get_editor_interface().get_base_control().add_child(_import_dialog)
 	
-	# Populate selection from FileSystem Dock before showing the window
+	_last_scanned_folder = ""
 	_populate_from_selection()
-	_import_dialog.popup_centered(Vector2i(1000, 600))
+	_validate_all()
+	_import_dialog.popup_centered(Vector2i(1080, 640))
 
 func _populate_from_selection() -> void:
 	if not get_editor_interface():
@@ -66,11 +121,9 @@ func _populate_from_selection() -> void:
 				_atlas_edit.text = path
 				_auto_predict_from_atlas(path)
 			else:
-				# Assume it might be an animation file, select its folder
 				_folder_edit.text = path.get_base_dir()
 		elif path.ends_with(".png"):
 			_png_edit.text = path
-			# Try to predict atlas and folder if they are empty
 			if _atlas_edit.text.strip_edges().is_empty():
 				var predicted_atlas := path.get_base_dir().path_join(path.get_file().get_basename() + ".json")
 				if FileAccess.file_exists(predicted_atlas):
@@ -78,8 +131,6 @@ func _populate_from_selection() -> void:
 					_auto_predict_from_atlas(predicted_atlas)
 		elif DirAccess.dir_exists_absolute(path):
 			_folder_edit.text = path
-	
-	_validate_all()
 
 func _auto_predict_from_atlas(atlas_path: String) -> void:
 	if atlas_path.is_empty():
@@ -113,14 +164,15 @@ func _auto_predict_from_atlas(atlas_path: String) -> void:
 
 	# 2. Predict Animation Folder
 	var predicted_anim_folder := base_dir.path_join("animations")
-	if DirAccess.dir_exists_absolute(predicted_anim_folder):
+	if DirAccess.dir_exists_absolute(predicted_anim_folder) or DirAccess.open(predicted_anim_folder) != null:
 		_folder_edit.text = predicted_anim_folder
 	else:
 		predicted_anim_folder = base_dir.path_join("animation")
-		if DirAccess.dir_exists_absolute(predicted_anim_folder):
+		if DirAccess.dir_exists_absolute(predicted_anim_folder) or DirAccess.open(predicted_anim_folder) != null:
 			_folder_edit.text = predicted_anim_folder
 		else:
 			_folder_edit.text = base_dir
+	_last_scanned_folder = ""
 
 	# 3. Predict Output Scene Path
 	var character_name := "imported_character"
@@ -138,6 +190,8 @@ func _save_settings() -> void:
 	config.set_value("settings", "use_pivot", _pivot_check.button_pressed)
 	config.set_value("settings", "add_swapper", _swapper_check.button_pressed)
 	config.set_value("settings", "filter_mode", _filter_option.selected)
+	if _grid_btn:
+		config.set_value("settings", "show_grid", _grid_btn.button_pressed)
 	
 	var dir := DirAccess.open("res://")
 	if dir != null and not dir.dir_exists(".godot"):
@@ -153,7 +207,8 @@ func _load_settings() -> Dictionary:
 		"fps_override": 0,
 		"use_pivot": true,
 		"add_swapper": true,
-		"filter_mode": 0
+		"filter_mode": 0,
+		"show_grid": true
 	}
 	var config := ConfigFile.new()
 	if config.load(SETTINGS_PATH) == OK:
@@ -165,6 +220,7 @@ func _load_settings() -> Dictionary:
 		res["use_pivot"] = config.get_value("settings", "use_pivot", true)
 		res["add_swapper"] = config.get_value("settings", "add_swapper", true)
 		res["filter_mode"] = config.get_value("settings", "filter_mode", 0)
+		res["show_grid"] = config.get_value("settings", "show_grid", true)
 	return res
 
 func _validate_all() -> void:
@@ -205,76 +261,128 @@ func _validate_all() -> void:
 		_png_val_lbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
 		png_ok = true
 
-	# Validate Folder/File & preview animations list
+	# Validate Folder/File & update animation checklist
 	var folder_path := _folder_edit.text.strip_edges()
-	_update_file_list(folder_path, _file_list_lbl)
+	_update_animation_checklist(folder_path)
 	
-	var is_valid_input := false
-	if not folder_path.is_empty():
-		var path_to_check := ProjectSettings.globalize_path(folder_path) if folder_path.begins_with("res://") else folder_path
-		if DirAccess.dir_exists_absolute(path_to_check) or FileAccess.file_exists(path_to_check):
-			is_valid_input = true
-		
-	if not is_valid_input:
+	var total_count := _anim_checkboxes.size()
+	if folder_path.is_empty():
 		_folder_val_lbl.text = "❌ No file or folder selected."
 		_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
+	elif total_count == 0:
+		_folder_val_lbl.text = "⚠️ No animation JSON files found."
+		_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
 	else:
-		var files := _get_anim_files_in_folder(folder_path)
-		if files.is_empty():
-			_folder_val_lbl.text = "⚠️ Path exists, but no animation JSON files found."
-			_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
-		else:
-			_folder_val_lbl.text = "✅ Path exists with %d animations." % files.size()
-			_folder_val_lbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
-			folder_ok = true
+		_folder_val_lbl.text = "✅ Found %d animation(s)." % total_count
+		_folder_val_lbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
+		folder_ok = true
 
-	_btn_import.disabled = not (atlas_ok and folder_ok and png_ok)
-	
-	if atlas_ok and folder_ok and png_ok:
-		_update_preview()
+	_update_action_buttons_state(atlas_ok, folder_ok, png_ok)
+
+func _update_action_buttons_state(atlas_ok: bool, folder_ok: bool, png_ok: bool) -> void:
+	var selected_anims := _get_selected_animations()
+	var has_selected := not selected_anims.is_empty()
+	var out_path := _out_edit.text.strip_edges()
+	var out_exists := FileAccess.file_exists(out_path)
+
+	if _anim_title_lbl:
+		_anim_title_lbl.text = "📋 Animations (%d/%d selected):" % [selected_anims.size(), _anim_checkboxes.size()]
+
+	if _btn_import:
+		_btn_import.disabled = not (atlas_ok and folder_ok and png_ok and has_selected)
+	if _btn_update:
+		_btn_update.disabled = not (atlas_ok and folder_ok and png_ok and has_selected and out_exists)
+		if out_exists:
+			_btn_update.text = "🔄 Update Scene (%s)" % out_path.get_file()
+		else:
+			_btn_update.text = "🔄 Update Existing Scene"
+
+	if atlas_ok and folder_ok and png_ok and has_selected:
+		_request_preview_update()
 	else:
 		_clear_preview()
 
-func _get_anim_files_in_folder(folder: String) -> Array:
-	var result: Array = []
-	if folder.is_empty():
-		return result
-	
-	var path_to_check := ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder
-	if FileAccess.file_exists(path_to_check) and folder.ends_with(".json"):
-		result.append(folder.get_file())
-		return result
-		
-	if not DirAccess.dir_exists_absolute(path_to_check):
-		return result
-		
-	var dir := DirAccess.open(folder)
-	if dir == null:
-		return result
-	dir.list_dir_begin()
-	var f := dir.get_next()
-	while f != "":
-		if not dir.current_is_dir() and f.ends_with(".json"):
-			var lower := f.to_lower()
-			if not lower.begins_with("spritemap") and not lower.begins_with("atlas"):
-				result.append(f)
-		f = dir.get_next()
-	dir.list_dir_end()
-	result.sort()
-	return result
-
-func _update_file_list(folder: String, lbl: Label) -> void:
-	var files := _get_anim_files_in_folder(folder)
-	var path_to_check := ProjectSettings.globalize_path(folder) if folder.begins_with("res://") else folder
-	var is_file := FileAccess.file_exists(path_to_check)
-	var is_dir := DirAccess.dir_exists_absolute(path_to_check)
-	if folder.is_empty() or (not is_file and not is_dir):
-		lbl.text = "(path not found)"
+func _update_animation_checklist(folder_path: String) -> void:
+	if not _anim_container: return
+	var clean_path := folder_path.replace("\\", "/").strip_edges()
+	if clean_path == _last_scanned_folder and not _anim_checkboxes.is_empty():
 		return
-	if files.is_empty():
-		lbl.text = "There is no Animation JSON in the path."
+	_last_scanned_folder = clean_path
+
+	for child in _anim_container.get_children():
+		child.queue_free()
+	_anim_checkboxes.clear()
+
+	if clean_path.is_empty():
+		var empty_lbl := Label.new()
+		empty_lbl.text = "(Select folder/file to list animations)"
+		empty_lbl.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
+		_anim_container.add_child(empty_lbl)
+		return
+
+	var importer = load("res://addons/AATTAAI/importer.gd").new()
+	var anim_list: Array = importer.get_available_animations(clean_path)
+
+	if anim_list.is_empty():
+		var empty_lbl := Label.new()
+		empty_lbl.text = "No animation JSON files found in this path."
+		empty_lbl.add_theme_color_override("font_color", Color(1.0, 0.7, 0.4))
+		_anim_container.add_child(empty_lbl)
+		return
+
+	for anim_name in anim_list:
+		var cb := CheckBox.new()
+		cb.text = anim_name
+		cb.button_pressed = true
+		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_anim_container.add_child(cb)
+		_anim_checkboxes[anim_name] = cb
+		cb.toggled.connect(func(_t: bool):
+			_on_anim_selection_changed()
+		)
+	
+	if _anim_search_edit and not _anim_search_edit.text.is_empty():
+		_filter_animation_checkboxes(_anim_search_edit.text)
+
+func _filter_animation_checkboxes(query: String) -> void:
+	var q := query.strip_edges().to_lower()
+	for anim_name in _anim_checkboxes:
+		var cb: CheckBox = _anim_checkboxes[anim_name]
+		if is_instance_valid(cb):
+			if q.is_empty() or q in anim_name.to_lower():
+				cb.visible = true
+			else:
+				cb.visible = false
+
+func _get_selected_animations() -> Array:
+	var res: Array = []
+	for anim_name in _anim_checkboxes:
+		var cb: CheckBox = _anim_checkboxes[anim_name]
+		if is_instance_valid(cb) and cb.button_pressed:
+			res.append(anim_name)
+	return res
+
+func _on_anim_selection_changed() -> void:
+	var selected := _get_selected_animations()
+	var has_selected := not selected.is_empty()
+	var out_path := _out_edit.text.strip_edges()
+	var out_exists := FileAccess.file_exists(out_path)
+
+	var atlas_path := _atlas_edit.text.strip_edges()
+	var png_path := _png_edit.text.strip_edges()
+	var files_ok = FileAccess.file_exists(atlas_path) and FileAccess.file_exists(png_path)
+
+	if _anim_title_lbl:
+		_anim_title_lbl.text = "📋 Animations (%d/%d selected):" % [selected.size(), _anim_checkboxes.size()]
+
+	_btn_import.disabled = not (files_ok and has_selected)
+	if _btn_update:
+		_btn_update.disabled = not (files_ok and has_selected and out_exists)
+
+	if has_selected:
+		_request_preview_update()
 	else:
-		lbl.text = "%d file(s) found:\n  • " % files.size() + "\n  • ".join(files)
+		_clear_preview()
 
 func _clear_preview() -> void:
 	if _preview_node:
@@ -285,6 +393,10 @@ func _clear_preview() -> void:
 		_anim_option.clear()
 	if _play_btn:
 		_play_btn.text = "⏸️ Pause"
+
+func _request_preview_update() -> void:
+	if _preview_debounce_timer:
+		_preview_debounce_timer.start(0.2)
 
 func _update_preview() -> void:
 	_clear_preview()
@@ -297,6 +409,10 @@ func _update_preview() -> void:
 	var add_swapper := _swapper_check.button_pressed
 	var filter_idx := _filter_option.selected
 	var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+	var selected_anims := _get_selected_animations()
+
+	if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or selected_anims.is_empty():
+		return
 
 	var importer = load("res://addons/AATTAAI/importer.gd").new()
 	var anim_files_override := []
@@ -305,7 +421,7 @@ func _update_preview() -> void:
 		anim_files_override.append(folder_path)
 		base_folder = folder_path.get_base_dir()
 
-	var root_node = importer.import_in_memory(atlas_path, base_folder, png_path, fps_val, anim_files_override, use_pivot, add_swapper, filter_mode)
+	var root_node = importer.import_in_memory(atlas_path, base_folder, png_path, fps_val, anim_files_override, selected_anims, use_pivot, add_swapper, filter_mode)
 	if root_node:
 		_preview_node = root_node
 		_preview_viewport.add_child(_preview_node)
@@ -324,62 +440,69 @@ func _update_preview() -> void:
 
 func _build_dialog() -> Window:
 	var dlg := Window.new()
-	dlg.title = "Adobe Animate Importer (AATAAI)"
-	dlg.size = Vector2i(1000, 600)
+	dlg.title = "Adobe Animate Importer (AATTAAI)"
+	dlg.size = Vector2i(1080, 640)
+	dlg.min_size = Vector2i(900, 520)
 	dlg.exclusive = true
 
 	var split := HSplitContainer.new()
 	split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 12)
 	dlg.add_child(split)
 
-	# Left side: ScrollContainer containing parameters
+	# ── Left Column Container (Scrollable Form + Pinned Bottom Bar) ─────
+	var left_vbox := VBoxContainer.new()
+	left_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_child(left_vbox)
+
+	# Left side ScrollContainer (Form Parameters)
 	var left_scroll := ScrollContainer.new()
 	left_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	split.add_child(left_scroll)
+	left_vbox.add_child(left_scroll)
 
-	var vbox := VBoxContainer.new()
-	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left_scroll.add_child(vbox)
+	var form_vbox := VBoxContainer.new()
+	form_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_scroll.add_child(form_vbox)
 
 	# ── Header Information ───────────────────────────────
 	var header := Label.new()
 	header.text = "ℹ️ Select the Spritemap JSON to auto-predict other paths."
 	header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	header.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
-	vbox.add_child(header)
-	vbox.add_child(HSeparator.new())
+	form_vbox.add_child(header)
+	form_vbox.add_child(HSeparator.new())
 
 	# ── Spritemap JSON ────────────────────────────────────
-	vbox.add_child(_label("Spritemap JSON (spritemap1.json):"))
+	form_vbox.add_child(_label("Spritemap JSON (spritemap1.json):"))
 	_atlas_edit = LineEdit.new()
 	_atlas_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_atlas_edit.placeholder_text = "res://assets/spritemap1.json"
-	var row_atlas := _browse_row(_atlas_edit); vbox.add_child(row_atlas)
+	var row_atlas := _browse_row(_atlas_edit); form_vbox.add_child(row_atlas)
 	
 	_atlas_val_lbl = Label.new()
 	_atlas_val_lbl.text = "❌ No file selected."
 	_atlas_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
-	vbox.add_child(_atlas_val_lbl)
+	form_vbox.add_child(_atlas_val_lbl)
 
 	# ── Spritesheet PNG ──────────────────────────────────
-	vbox.add_child(_label("Spritesheet PNG (spritemap1.png):"))
+	form_vbox.add_child(_label("Spritesheet PNG (spritemap1.png):"))
 	_png_edit = LineEdit.new()
 	_png_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_png_edit.placeholder_text = "res://assets/spritemap1.png"
-	var row_png := _browse_row(_png_edit); vbox.add_child(row_png)
+	var row_png := _browse_row(_png_edit); form_vbox.add_child(row_png)
 	
 	_png_val_lbl = Label.new()
 	_png_val_lbl.text = "❌ No file selected."
 	_png_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
-	vbox.add_child(_png_val_lbl)
+	form_vbox.add_child(_png_val_lbl)
 
 	# ── Animation JSON File or Folder ─────────────────────
-	vbox.add_child(_label("Animation JSON File or Folder:"))
+	form_vbox.add_child(_label("Animation JSON File or Folder:"))
 	_folder_edit = LineEdit.new()
 	_folder_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_folder_edit.placeholder_text = "res://assets/Animation.json or res://assets/animations/"
-	var row_folder := HBoxContainer.new(); vbox.add_child(row_folder)
+	var row_folder := HBoxContainer.new(); form_vbox.add_child(row_folder)
 	row_folder.add_child(_folder_edit)
 	
 	var btn_folder_file := Button.new(); btn_folder_file.text = "Browse File"
@@ -391,37 +514,68 @@ func _build_dialog() -> Window:
 	_folder_val_lbl = Label.new()
 	_folder_val_lbl.text = "❌ No file or folder selected."
 	_folder_val_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
-	vbox.add_child(_folder_val_lbl)
+	form_vbox.add_child(_folder_val_lbl)
 
-	# ── Preview daftar file (Scrollable) ──────────────────
-	var scroll_preview := ScrollContainer.new()
-	scroll_preview.custom_minimum_size = Vector2(0, 80)
-	scroll_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll_preview)
+	# ── Animations Selection & Search Header ─────────────
+	var anim_hdr := HBoxContainer.new()
+	form_vbox.add_child(anim_hdr)
+	
+	_anim_title_lbl = Label.new()
+	_anim_title_lbl.text = "📋 Animations to Import:"
+	_anim_title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	anim_hdr.add_child(_anim_title_lbl)
+	
+	_btn_select_all = Button.new()
+	_btn_select_all.text = "☑️ All"
+	anim_hdr.add_child(_btn_select_all)
+	
+	_btn_deselect_all = Button.new()
+	_btn_deselect_all.text = "⬜ None"
+	anim_hdr.add_child(_btn_deselect_all)
 
-	_file_list_lbl = Label.new()
-	_file_list_lbl.text = "(select the folder for the list)"
-	_file_list_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_file_list_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
-	_file_list_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll_preview.add_child(_file_list_lbl)
+	_btn_select_filtered = Button.new()
+	_btn_select_filtered.text = "🎯 Select Filtered"
+	_btn_select_filtered.tooltip_text = "Select all animations matching the search filter below"
+	anim_hdr.add_child(_btn_select_filtered)
+
+	# Search Filter Bar
+	_anim_search_edit = LineEdit.new()
+	_anim_search_edit.placeholder_text = "🔍 Filter animations (e.g. attack, idle, walk)..."
+	_anim_search_edit.clear_button_enabled = true
+	form_vbox.add_child(_anim_search_edit)
+
+	# Scrollable Grid of Checkboxes
+	var anim_panel := PanelContainer.new()
+	anim_panel.custom_minimum_size = Vector2(0, 130)
+	anim_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	form_vbox.add_child(anim_panel)
+
+	var scroll_anim := ScrollContainer.new()
+	scroll_anim.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_anim.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	anim_panel.add_child(scroll_anim)
+
+	_anim_container = GridContainer.new()
+	_anim_container.columns = 2
+	_anim_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_anim.add_child(_anim_container)
 
 	# ── Output scene ─────────────────────────────────────
-	vbox.add_child(_label("Output scene path:"))
+	form_vbox.add_child(_label("Output scene path:"))
 	_out_edit = LineEdit.new()
 	_out_edit.text = "res://imported_character.tscn"
 	_out_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(_out_edit)
+	form_vbox.add_child(_out_edit)
 
 	# ── FPS override ─────────────────────────────────────
-	var fps_row := HBoxContainer.new(); vbox.add_child(fps_row)
+	var fps_row := HBoxContainer.new(); form_vbox.add_child(fps_row)
 	fps_row.add_child(_label("FPS override (0 = dari JSON):"))
 	_fps_spin = SpinBox.new()
 	_fps_spin.min_value = 0; _fps_spin.max_value = 120; _fps_spin.value = 0
 	fps_row.add_child(_fps_spin)
 
-	# ── Texture Filter dropdown (Feature 10) ─────────────
-	var filter_row := HBoxContainer.new(); vbox.add_child(filter_row)
+	# ── Texture Filter dropdown ──────────────────────────
+	var filter_row := HBoxContainer.new(); form_vbox.add_child(filter_row)
 	filter_row.add_child(_label("Texture Filter:"))
 	_filter_option = OptionButton.new()
 	_filter_option.add_item("Linear (Smooth)", 0)
@@ -429,30 +583,45 @@ func _build_dialog() -> Window:
 	_filter_option.selected = 0
 	filter_row.add_child(_filter_option)
 
-	# ── Checkboxes (Features 3 and 7) ────────────────────
+	# ── Checkboxes ───────────────────────────────────────
 	_pivot_check = CheckBox.new()
 	_pivot_check.text = "Use Pivot Wrapper Nodes (Allows Manual Recenter)"
 	_pivot_check.button_pressed = true
-	vbox.add_child(_pivot_check)
+	form_vbox.add_child(_pivot_check)
 
 	_swapper_check = CheckBox.new()
-	_swapper_check.text = "Add Skin Swapper Script (@tool)"
+	_swapper_check.text = "Add Visual Controller Script (@tool)"
 	_swapper_check.button_pressed = true
-	vbox.add_child(_swapper_check)
+	form_vbox.add_child(_swapper_check)
 
-	vbox.add_child(HSeparator.new())
+	# ── PINNED BOTTOM ACTION BAR (Always visible!) ───────
+	var bottom_bar := VBoxContainer.new()
+	bottom_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_vbox.add_child(bottom_bar)
 
-	# ── Status ───────────────────────────────────────────
+	bottom_bar.add_child(HSeparator.new())
+
 	_status_lbl = Label.new()
 	_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(_status_lbl)
+	bottom_bar.add_child(_status_lbl)
 
-	# ── Import button ─────────────────────────────────────
+	var btn_action_row := HBoxContainer.new()
+	btn_action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_bar.add_child(btn_action_row)
+
 	_btn_import = Button.new()
-	_btn_import.text = "⬇️ Import & Generate Scene"
-	vbox.add_child(_btn_import)
+	_btn_import.text = "⬇️ Fresh Import"
+	_btn_import.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_import.custom_minimum_size = Vector2(0, 34)
+	btn_action_row.add_child(_btn_import)
 
-	# Right side: Interactive Viewport Preview (Feature 11)
+	_btn_update = Button.new()
+	_btn_update.text = "🔄 Update Existing Scene"
+	_btn_update.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_update.custom_minimum_size = Vector2(0, 34)
+	btn_action_row.add_child(_btn_update)
+
+	# ── Right side: Interactive Viewport Preview ─────────
 	var right_vbox := VBoxContainer.new()
 	right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -475,20 +644,25 @@ func _build_dialog() -> Window:
 	_preview_viewport = SubViewport.new()
 	_preview_viewport.disable_3d = true
 	_preview_viewport.transparent_bg = false
-	_preview_viewport.world_2d = World2D.new() # isolated preview world
+	_preview_viewport.world_2d = World2D.new()
 	vp_container.add_child(_preview_viewport)
 
-	# Add CanvasLayer to make sure background covers entire viewport screen
 	var canvas_layer := CanvasLayer.new()
 	canvas_layer.layer = -100
 	_preview_viewport.add_child(canvas_layer)
 
 	var bg_rect := ColorRect.new()
-	bg_rect.color = Color(0.25, 0.25, 0.25, 1.0)
+	bg_rect.color = Color(0.22, 0.22, 0.24, 1.0)
 	bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	canvas_layer.add_child(bg_rect)
 
-	# Add Camera
+	# Add Coordinate & Floor Grid
+	var preview_grid = AATTAIPreviewGrid.new()
+	preview_grid.z_index = -50
+	preview_grid.show_grid = true
+	_preview_grid = preview_grid
+	_preview_viewport.add_child(preview_grid)
+
 	var camera := Camera2D.new()
 	camera.position = Vector2(0, -100)
 	camera.zoom = Vector2(1.5, 1.5)
@@ -508,7 +682,6 @@ func _build_dialog() -> Window:
 				camera.position = Vector2(0, -100)
 				camera.zoom = Vector2(1.5, 1.5)
 		elif event is InputEventMouseMotion:
-			# Check button mask for Right or Middle mouse button drag
 			var right_pressed = (event.button_mask & MOUSE_BUTTON_MASK_RIGHT) != 0
 			var middle_pressed = (event.button_mask & MOUSE_BUTTON_MASK_MIDDLE) != 0
 			if right_pressed or middle_pressed:
@@ -528,8 +701,20 @@ func _build_dialog() -> Window:
 	_anim_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ctrl_row.add_child(_anim_option)
 
+	# Grid Toggle Button
+	_grid_btn = Button.new()
+	_grid_btn.text = "📏 Grid"
+	_grid_btn.toggle_mode = true
+	_grid_btn.button_pressed = true
+	_grid_btn.tooltip_text = "Toggle Origin Axes & Floor Grid"
+	ctrl_row.add_child(_grid_btn)
+	_grid_btn.toggled.connect(func(t: bool):
+		if is_instance_valid(_preview_grid):
+			_preview_grid.show_grid = t
+	)
+
 	var bg_picker := ColorPickerButton.new()
-	bg_picker.color = Color(0.0, 0.0, 0.0)
+	bg_picker.color = Color(0.22, 0.22, 0.24, 1.0)
 	bg_picker.custom_minimum_size = Vector2(40, 0)
 	bg_picker.tooltip_text = "Change preview background color"
 	ctrl_row.add_child(bg_picker)
@@ -556,22 +741,57 @@ func _build_dialog() -> Window:
 	_preview_timer.autostart = true
 	dlg.add_child(_preview_timer)
 
+	# Debounce timer for preview rendering
+	_preview_debounce_timer = Timer.new()
+	_preview_debounce_timer.one_shot = true
+	_preview_debounce_timer.wait_time = 0.25
+	_preview_debounce_timer.timeout.connect(_update_preview)
+	dlg.add_child(_preview_debounce_timer)
+
 	# ── File dialogs ─────────────────────────────────────
 	var fd_atlas := _make_file_dialog(dlg, "*.json", _atlas_edit)
 	var fd_png   := _make_file_dialog(dlg, "*.png",  _png_edit)
 	var fd_anim_file := _make_file_dialog(dlg, "*.json", _folder_edit)
 
-	# Folder dialog
 	var fd_folder := FileDialog.new()
 	fd_folder.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	fd_folder.access = FileDialog.ACCESS_RESOURCES
 	dlg.add_child(fd_folder)
 
-	# Hubungkan browse buttons
 	_get_browse_btn(row_atlas).pressed.connect(func(): fd_atlas.popup_centered(Vector2i(700,500)))
 	_get_browse_btn(row_png).pressed.connect(func():   fd_png.popup_centered(Vector2i(700,500)))
 	btn_folder_file.pressed.connect(func(): fd_anim_file.popup_centered(Vector2i(700,500)))
 	btn_folder.pressed.connect(func(): fd_folder.popup_centered(Vector2i(700,500)))
+
+	# Search Filter Listener
+	_anim_search_edit.text_changed.connect(func(query: String):
+		_filter_animation_checkboxes(query)
+	)
+
+	# Selection Buttons Listeners
+	_btn_select_all.pressed.connect(func():
+		for anim_name in _anim_checkboxes:
+			var cb: CheckBox = _anim_checkboxes[anim_name]
+			if is_instance_valid(cb):
+				cb.set_pressed_no_signal(true)
+		_on_anim_selection_changed()
+	)
+
+	_btn_deselect_all.pressed.connect(func():
+		for anim_name in _anim_checkboxes:
+			var cb: CheckBox = _anim_checkboxes[anim_name]
+			if is_instance_valid(cb):
+				cb.set_pressed_no_signal(false)
+		_on_anim_selection_changed()
+	)
+
+	_btn_select_filtered.pressed.connect(func():
+		for anim_name in _anim_checkboxes:
+			var cb: CheckBox = _anim_checkboxes[anim_name]
+			if is_instance_valid(cb) and cb.visible:
+				cb.set_pressed_no_signal(true)
+		_on_anim_selection_changed()
+	)
 
 	# Load settings on start
 	var settings := _load_settings()
@@ -583,28 +803,31 @@ func _build_dialog() -> Window:
 	_pivot_check.button_pressed = settings["use_pivot"]
 	_swapper_check.button_pressed = settings["add_swapper"]
 	_filter_option.selected = settings["filter_mode"]
+	if _grid_btn:
+		_grid_btn.button_pressed = settings["show_grid"]
+		if is_instance_valid(_preview_grid):
+			_preview_grid.show_grid = settings["show_grid"]
 
-	# Connect signals for validation and prediction
+	# Signals
 	_atlas_edit.text_changed.connect(func(t: String):
 		_auto_predict_from_atlas(t.strip_edges())
 		_validate_all()
 	)
-	_png_edit.text_changed.connect(func(t: String):
+	_png_edit.text_changed.connect(func(_t: String):
 		_validate_all()
 	)
-	_folder_edit.text_changed.connect(func(t: String):
+	_folder_edit.text_changed.connect(func(_t: String):
+		_last_scanned_folder = ""
 		_validate_all()
 	)
-	_out_edit.text_changed.connect(func(t: String):
+	_out_edit.text_changed.connect(func(_t: String):
 		_validate_all()
 	)
 	
-	# Option / Checkbox changes trigger preview refresh
 	_pivot_check.pressed.connect(_validate_all)
 	_swapper_check.pressed.connect(_validate_all)
-	_filter_option.item_selected.connect(func(idx): _validate_all())
+	_filter_option.item_selected.connect(func(_idx): _validate_all())
 
-	# File Dialog selections trigger validation and prediction
 	fd_atlas.file_selected.connect(func(path: String):
 		_atlas_edit.text = path
 		_auto_predict_from_atlas(path)
@@ -614,12 +837,17 @@ func _build_dialog() -> Window:
 		_png_edit.text = path
 		_validate_all()
 	)
+	fd_anim_file.file_selected.connect(func(path: String):
+		_folder_edit.text = path
+		_last_scanned_folder = ""
+		_validate_all()
+	)
 	fd_folder.dir_selected.connect(func(dir: String):
 		_folder_edit.text = dir
+		_last_scanned_folder = ""
 		_validate_all()
 	)
 
-	# Connect preview controls
 	_play_btn.pressed.connect(func():
 		if not _preview_player: return
 		if _preview_player.is_playing():
@@ -643,7 +871,7 @@ func _build_dialog() -> Window:
 			_was_playing_before_scrub = _preview_player.is_playing()
 			_preview_player.pause()
 	)
-	_scrub_slider.drag_ended.connect(func(value_changed: bool):
+	_scrub_slider.drag_ended.connect(func(_value_changed: bool):
 		_is_scrubbing = false
 		if _preview_player:
 			var anim_name = _preview_player.assigned_animation
@@ -678,10 +906,10 @@ func _build_dialog() -> Window:
 			_is_updating_slider = false
 	)
 
-	# Run initial validation
+	# Initial validation
 	_validate_all()
 
-	# ── Import logic ──────────────────────────────────────
+	# ── Fresh Import Logic ────────────────────────────────
 	_btn_import.pressed.connect(func():
 		var atlas_path := _atlas_edit.text.strip_edges()
 		var folder_path := _folder_edit.text.strip_edges()
@@ -692,15 +920,19 @@ func _build_dialog() -> Window:
 		var add_swapper := _swapper_check.button_pressed
 		var filter_idx := _filter_option.selected
 		var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+		var selected_anims := _get_selected_animations()
 
 		if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or out_path.is_empty():
 			_status_lbl.text = "⚠️ Fill all fields."
 			return
 
-		_status_lbl.text = "⏳ Importing..."
+		if selected_anims.is_empty():
+			_status_lbl.text = "⚠️ Please select at least one animation to import."
+			return
+
+		_status_lbl.text = "⏳ Importing %d animation(s)..." % selected_anims.size()
 		var importer = load("res://addons/AATTAAI/importer.gd").new()
 		
-		# If folder_path is actually a single JSON file, pass it in the anim_files array override!
 		var anim_files_override := []
 		var base_folder := folder_path
 		if folder_path.ends_with(".json"):
@@ -709,12 +941,57 @@ func _build_dialog() -> Window:
 
 		var err: String = importer.import_folder(
 			atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override,
-			use_pivot, add_swapper, filter_mode
+			selected_anims, use_pivot, add_swapper, filter_mode
 		)
 
 		if err == "":
-			_status_lbl.text = "✅ Done! Imported animations successfully.\nScene: %s" % out_path
+			_status_lbl.text = "✅ Done! Imported %d animation(s) successfully.\nScene: %s" % [selected_anims.size(), out_path]
 			_save_settings()
+			_validate_all()
+			get_editor_interface().get_resource_filesystem().scan()
+		else:
+			_status_lbl.text = "❌ Error: " + err
+	)
+
+	# ── Update Existing Scene Logic ───────────────────────
+	_btn_update.pressed.connect(func():
+		var atlas_path := _atlas_edit.text.strip_edges()
+		var folder_path := _folder_edit.text.strip_edges()
+		var png_path := _png_edit.text.strip_edges()
+		var out_path := _out_edit.text.strip_edges()
+		var fps_val := int(_fps_spin.value)
+		var use_pivot := _pivot_check.button_pressed
+		var add_swapper := _swapper_check.button_pressed
+		var filter_idx := _filter_option.selected
+		var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+		var selected_anims := _get_selected_animations()
+
+		if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or out_path.is_empty():
+			_status_lbl.text = "⚠️ Fill all fields."
+			return
+
+		if selected_anims.is_empty():
+			_status_lbl.text = "⚠️ Please select at least one animation to update."
+			return
+
+		_status_lbl.text = "⏳ Updating %d animation(s) in existing scene..." % selected_anims.size()
+		var importer = load("res://addons/AATTAAI/importer.gd").new()
+		
+		var anim_files_override := []
+		var base_folder := folder_path
+		if folder_path.ends_with(".json"):
+			anim_files_override.append(folder_path)
+			base_folder = folder_path.get_base_dir()
+
+		var err: String = importer.update_existing_scene(
+			atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override,
+			selected_anims, use_pivot, add_swapper, filter_mode
+		)
+
+		if err == "":
+			_status_lbl.text = "✅ Done! Updated %d animation(s) in existing scene:\n%s" % [selected_anims.size(), out_path]
+			_save_settings()
+			_validate_all()
 			get_editor_interface().get_resource_filesystem().scan()
 		else:
 			_status_lbl.text = "❌ Error: " + err
