@@ -43,6 +43,7 @@ class AATTAIPreviewGrid extends Node2D:
 		draw_arc(Vector2.ZERO, 6.0, 0, TAU, 16, Color(1.0, 0.8, 0.2, 0.8), 1.2)
 
 var _import_dialog: Window
+var _interp_dialog: Window
 var _atlas_edit: LineEdit
 var _folder_edit: LineEdit
 var _png_edit: LineEdit
@@ -70,11 +71,13 @@ var _last_scanned_folder: String = ""
 var _pivot_check: CheckBox
 var _swapper_check: CheckBox
 var _filter_option: OptionButton
+var _interp_option: OptionButton
 
 # Preview panel variables
 var _preview_viewport: SubViewport
 var _preview_grid: Node2D
 var _grid_btn: Button
+var _loop_btn: Button
 var _preview_node: Node2D
 var _preview_player: AnimationPlayer
 var _play_btn: Button
@@ -90,12 +93,16 @@ const SETTINGS_PATH = "res://.godot/aattaai_settings.cfg"
 
 func _enter_tree() -> void:
 	add_tool_menu_item("Import Adobe Animate...", _on_import_menu_pressed)
+	add_tool_menu_item("Batch Set Animation Interpolation...", _on_interp_tool_pressed)
 	print("[AdobeAnimateImporter] Plugin loaded.")
 
 func _exit_tree() -> void:
 	remove_tool_menu_item("Import Adobe Animate...")
+	remove_tool_menu_item("Batch Set Animation Interpolation...")
 	if _import_dialog:
 		_import_dialog.queue_free()
+	if _interp_dialog:
+		_interp_dialog.queue_free()
 
 func _on_import_menu_pressed() -> void:
 	if not _import_dialog:
@@ -106,6 +113,13 @@ func _on_import_menu_pressed() -> void:
 	_populate_from_selection()
 	_validate_all()
 	_import_dialog.popup_centered(Vector2i(1080, 640))
+
+func _on_interp_tool_pressed() -> void:
+	if not _interp_dialog:
+		_interp_dialog = _build_interp_dialog()
+		get_editor_interface().get_base_control().add_child(_interp_dialog)
+	
+	_interp_dialog.popup_centered(Vector2i(650, 420))
 
 func _populate_from_selection() -> void:
 	if not get_editor_interface():
@@ -190,8 +204,12 @@ func _save_settings() -> void:
 	config.set_value("settings", "use_pivot", _pivot_check.button_pressed)
 	config.set_value("settings", "add_swapper", _swapper_check.button_pressed)
 	config.set_value("settings", "filter_mode", _filter_option.selected)
+	if _interp_option:
+		config.set_value("settings", "interp_mode", _interp_option.selected)
 	if _grid_btn:
 		config.set_value("settings", "show_grid", _grid_btn.button_pressed)
+	if _loop_btn:
+		config.set_value("settings", "preview_loop", _loop_btn.button_pressed)
 	
 	var dir := DirAccess.open("res://")
 	if dir != null and not dir.dir_exists(".godot"):
@@ -208,7 +226,9 @@ func _load_settings() -> Dictionary:
 		"use_pivot": true,
 		"add_swapper": true,
 		"filter_mode": 0,
-		"show_grid": true
+		"interp_mode": 0,
+		"show_grid": true,
+		"preview_loop": true
 	}
 	var config := ConfigFile.new()
 	if config.load(SETTINGS_PATH) == OK:
@@ -220,7 +240,9 @@ func _load_settings() -> Dictionary:
 		res["use_pivot"] = config.get_value("settings", "use_pivot", true)
 		res["add_swapper"] = config.get_value("settings", "add_swapper", true)
 		res["filter_mode"] = config.get_value("settings", "filter_mode", 0)
+		res["interp_mode"] = config.get_value("settings", "interp_mode", 0)
 		res["show_grid"] = config.get_value("settings", "show_grid", true)
+		res["preview_loop"] = config.get_value("settings", "preview_loop", true)
 	return res
 
 func _validate_all() -> void:
@@ -398,6 +420,13 @@ func _request_preview_update() -> void:
 	if _preview_debounce_timer:
 		_preview_debounce_timer.start(0.2)
 
+func _get_interp_mode_str() -> String:
+	if not _interp_option: return "Linear"
+	match _interp_option.selected:
+		1: return "Nearest"
+		2: return "Cubic"
+		_: return "Linear"
+
 func _update_preview() -> void:
 	_clear_preview()
 	
@@ -409,6 +438,7 @@ func _update_preview() -> void:
 	var add_swapper := _swapper_check.button_pressed
 	var filter_idx := _filter_option.selected
 	var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+	var interp_mode := _get_interp_mode_str()
 	var selected_anims := _get_selected_animations()
 
 	if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or selected_anims.is_empty():
@@ -421,7 +451,7 @@ func _update_preview() -> void:
 		anim_files_override.append(folder_path)
 		base_folder = folder_path.get_base_dir()
 
-	var root_node = importer.import_in_memory(atlas_path, base_folder, png_path, fps_val, anim_files_override, selected_anims, use_pivot, add_swapper, filter_mode)
+	var root_node = importer.import_in_memory(atlas_path, base_folder, png_path, fps_val, anim_files_override, selected_anims, use_pivot, add_swapper, filter_mode, interp_mode)
 	if root_node:
 		_preview_node = root_node
 		_preview_viewport.add_child(_preview_node)
@@ -432,11 +462,20 @@ func _update_preview() -> void:
 			var lib = _preview_player.get_animation_library("")
 			if lib:
 				var anims = lib.get_animation_list()
+				var is_loop := _loop_btn.button_pressed if _loop_btn else true
 				for a in anims:
 					_anim_option.add_item(a)
+					var anim_res: Animation = lib.get_animation(a)
+					if anim_res:
+						anim_res.loop_mode = Animation.LOOP_LINEAR if is_loop else Animation.LOOP_NONE
 				if anims.size() > 0:
 					_preview_player.play(anims[0])
 					_play_btn.text = "⏸️ Pause"
+			
+			_preview_player.animation_finished.connect(func(_anim_name: String):
+				if _loop_btn and not _loop_btn.button_pressed:
+					_play_btn.text = "▶️ Play"
+			)
 
 func _build_dialog() -> Window:
 	var dlg := Window.new()
@@ -583,6 +622,16 @@ func _build_dialog() -> Window:
 	_filter_option.selected = 0
 	filter_row.add_child(_filter_option)
 
+	# ── Animation Interpolation dropdown ─────────────────
+	var interp_row := HBoxContainer.new(); form_vbox.add_child(interp_row)
+	interp_row.add_child(_label("Animation Interpolation:"))
+	_interp_option = OptionButton.new()
+	_interp_option.add_item("Linear (Smooth Tween)", 0)
+	_interp_option.add_item("Nearest / Stepped (Frame-by-Frame)", 1)
+	_interp_option.add_item("Cubic (Spline Curve)", 2)
+	_interp_option.selected = 0
+	interp_row.add_child(_interp_option)
+
 	# ── Checkboxes ───────────────────────────────────────
 	_pivot_check = CheckBox.new()
 	_pivot_check.text = "Use Pivot Wrapper Nodes (Allows Manual Recenter)"
@@ -701,6 +750,23 @@ func _build_dialog() -> Window:
 	_anim_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ctrl_row.add_child(_anim_option)
 
+	# Loop Toggle Button (Feature 1)
+	_loop_btn = Button.new()
+	_loop_btn.text = "🔁 Loop"
+	_loop_btn.toggle_mode = true
+	_loop_btn.button_pressed = true
+	_loop_btn.tooltip_text = "Toggle Animation Loop in Preview"
+	ctrl_row.add_child(_loop_btn)
+	_loop_btn.toggled.connect(func(is_loop: bool):
+		if is_instance_valid(_preview_player):
+			var lib = _preview_player.get_animation_library("")
+			if lib:
+				for a in lib.get_animation_list():
+					var anim_res: Animation = lib.get_animation(a)
+					if anim_res:
+						anim_res.loop_mode = Animation.LOOP_LINEAR if is_loop else Animation.LOOP_NONE
+	)
+
 	# Grid Toggle Button
 	_grid_btn = Button.new()
 	_grid_btn.text = "📏 Grid"
@@ -803,10 +869,13 @@ func _build_dialog() -> Window:
 	_pivot_check.button_pressed = settings["use_pivot"]
 	_swapper_check.button_pressed = settings["add_swapper"]
 	_filter_option.selected = settings["filter_mode"]
+	_interp_option.selected = settings["interp_mode"]
 	if _grid_btn:
 		_grid_btn.button_pressed = settings["show_grid"]
 		if is_instance_valid(_preview_grid):
 			_preview_grid.show_grid = settings["show_grid"]
+	if _loop_btn:
+		_loop_btn.button_pressed = settings["preview_loop"]
 
 	# Signals
 	_atlas_edit.text_changed.connect(func(t: String):
@@ -823,10 +892,14 @@ func _build_dialog() -> Window:
 	_out_edit.text_changed.connect(func(_t: String):
 		_validate_all()
 	)
+	_fps_spin.value_changed.connect(func(_v: float):
+		_validate_all()
+	)
 	
 	_pivot_check.pressed.connect(_validate_all)
 	_swapper_check.pressed.connect(_validate_all)
 	_filter_option.item_selected.connect(func(_idx): _validate_all())
+	_interp_option.item_selected.connect(func(_idx): _validate_all())
 
 	fd_atlas.file_selected.connect(func(path: String):
 		_atlas_edit.text = path
@@ -920,6 +993,7 @@ func _build_dialog() -> Window:
 		var add_swapper := _swapper_check.button_pressed
 		var filter_idx := _filter_option.selected
 		var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+		var interp_mode := _get_interp_mode_str()
 		var selected_anims := _get_selected_animations()
 
 		if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or out_path.is_empty():
@@ -941,7 +1015,7 @@ func _build_dialog() -> Window:
 
 		var err: String = importer.import_folder(
 			atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override,
-			selected_anims, use_pivot, add_swapper, filter_mode
+			selected_anims, use_pivot, add_swapper, filter_mode, interp_mode
 		)
 
 		if err == "":
@@ -964,6 +1038,7 @@ func _build_dialog() -> Window:
 		var add_swapper := _swapper_check.button_pressed
 		var filter_idx := _filter_option.selected
 		var filter_mode := "Linear" if filter_idx == 0 else "Nearest"
+		var interp_mode := _get_interp_mode_str()
 		var selected_anims := _get_selected_animations()
 
 		if atlas_path.is_empty() or folder_path.is_empty() or png_path.is_empty() or out_path.is_empty():
@@ -985,11 +1060,11 @@ func _build_dialog() -> Window:
 
 		var err: String = importer.update_existing_scene(
 			atlas_path, base_folder, png_path, out_path, fps_val, anim_files_override,
-			selected_anims, use_pivot, add_swapper, filter_mode
+			selected_anims, use_pivot, add_swapper, filter_mode, interp_mode
 		)
 
 		if err == "":
-			_status_lbl.text = "✅ Done! Updated %d animation(s) in existing scene:\n%s" % [selected_anims.size(), out_path]
+			_status_lbl.text = "✅ Done! Updated %d animation(s) in existing scene:\n%s\n\n💡 Tip: If this scene is already open in your editor, please close and re-open its scene tab (or Project -> Reload Current Project) to refresh the AnimationPlayer in Godot." % [selected_anims.size(), out_path]
 			_save_settings()
 			_validate_all()
 			get_editor_interface().get_resource_filesystem().scan()
@@ -1001,6 +1076,100 @@ func _build_dialog() -> Window:
 		_clear_preview()
 		dlg.hide()
 	)
+	return dlg
+
+# ── Batch Set Interpolation Dialog (Feature 3) ────────────
+func _build_interp_dialog() -> Window:
+	var dlg := Window.new()
+	dlg.title = "Batch Set Animation Interpolation (AATTAAI)"
+	dlg.size = Vector2i(650, 420)
+	dlg.min_size = Vector2i(550, 360)
+	dlg.exclusive = true
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 12)
+	dlg.add_child(margin)
+
+	var vbox := VBoxContainer.new()
+	margin.add_child(vbox)
+
+	var header := Label.new()
+	header.text = "⚡ Batch-change track interpolation on specific animations in any character scene."
+	header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
+	vbox.add_child(header)
+	vbox.add_child(HSeparator.new())
+
+	# Target Scene Path
+	vbox.add_child(_label("Target Scene (.tscn):"))
+	var scene_edit := LineEdit.new()
+	scene_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scene_edit.placeholder_text = "res://imported_character.tscn"
+	if _out_edit and not _out_edit.text.is_empty():
+		scene_edit.text = _out_edit.text
+	var row_scene := _browse_row(scene_edit); vbox.add_child(row_scene)
+
+	var fd_scene := _make_file_dialog(dlg, "*.tscn", scene_edit)
+	_get_browse_btn(row_scene).pressed.connect(func(): fd_scene.popup_centered(Vector2i(700, 500)))
+
+	# Animation Name / Pattern Input
+	vbox.add_child(_label("Animation Name(s) or Pattern (e.g. attack*, hit_react, *pixel*):"))
+	var pattern_edit := LineEdit.new()
+	pattern_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pattern_edit.placeholder_text = "e.g. attack* or punch, kick, jump"
+	vbox.add_child(pattern_edit)
+
+	# Interpolation Type Dropdown
+	var interp_row := HBoxContainer.new(); vbox.add_child(interp_row)
+	interp_row.add_child(_label("Target Interpolation Type:"))
+	var opt_interp := OptionButton.new()
+	opt_interp.add_item("Nearest / Stepped (Frame-by-Frame)", 0)
+	opt_interp.add_item("Linear (Smooth Tween)", 1)
+	opt_interp.add_item("Cubic (Spline Curve)", 2)
+	opt_interp.selected = 0
+	interp_row.add_child(opt_interp)
+
+	vbox.add_child(HSeparator.new())
+
+	var status_lbl := Label.new()
+	status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(status_lbl)
+
+	var btn_apply := Button.new()
+	btn_apply.text = "⚡ Apply Interpolation to Matching Animations"
+	btn_apply.custom_minimum_size = Vector2(0, 36)
+	vbox.add_child(btn_apply)
+
+	btn_apply.pressed.connect(func():
+		var sc_path := scene_edit.text.strip_edges()
+		var pat := pattern_edit.text.strip_edges()
+		if sc_path.is_empty():
+			status_lbl.text = "⚠️ Please select a target scene (.tscn)."
+			return
+		if pat.is_empty():
+			pat = "*"
+
+		var target_mode := "Nearest"
+		match opt_interp.selected:
+			1: target_mode = "Linear"
+			2: target_mode = "Cubic"
+			_: target_mode = "Nearest"
+
+		status_lbl.text = "⏳ Processing..."
+		var importer = load("res://addons/AATTAAI/importer.gd").new()
+		var res: Dictionary = importer.set_animations_interpolation(sc_path, pat, target_mode)
+
+		if res["success"]:
+			status_lbl.text = "✅ Success! Updated %d animation(s) to '%s':\n• %s\n\n💡 Tip: Please reload/re-open the scene tab to see changes." % [
+				res["modified_count"], target_mode, "\n• ".join(res["matched_anims"])
+			]
+			get_editor_interface().get_resource_filesystem().scan()
+		else:
+			status_lbl.text = "❌ Error: " + res.get("error", "Unknown error")
+	)
+
+	dlg.close_requested.connect(func(): dlg.hide())
 	return dlg
 
 func _label(text: String) -> Label:

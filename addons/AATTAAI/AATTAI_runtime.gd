@@ -10,6 +10,7 @@ extends Node2D
 @export var use_pivot_wrappers: bool = true
 @export var add_skin_swapper: bool = true
 @export_enum("Linear", "Nearest") var texture_filter_mode: String = "Linear"
+@export_enum("Linear", "Nearest", "Cubic") var interpolation_mode: String = "Linear"
 
 var _sprites: Dictionary = {}
 var _symbol_map: Dictionary = {}
@@ -18,13 +19,14 @@ var _texture: Texture2D
 func _ready() -> void:
 	if atlas_json_path and png_path and (animation_json_path or animation_folder_path):
 		build(atlas_json_path, animation_json_path, png_path, animation_folder_path,
-			  use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+			  use_pivot_wrappers, add_skin_swapper, texture_filter_mode, interpolation_mode)
 		if auto_play != "" and has_node("AnimationPlayer"):
 			$AnimationPlayer.play(auto_play)
 
 func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder: String = "",
 		   p_use_pivot_wrappers: bool = true, p_add_skin_swapper: bool = true,
-		   p_texture_filter_mode: String = "Linear") -> void:
+		   p_texture_filter_mode: String = "Linear",
+		   p_interpolation_mode: String = "Linear") -> void:
 	var atlas_data = _load_json(atlas_path)
 	if atlas_data == null:
 		push_error("[AATAIRuntime] cannot load atlas JSON")
@@ -281,7 +283,16 @@ func build(atlas_path: String, anim_path: String, tex_path: String, anim_folder:
 			animation.track_set_path(t_vis, NodePath(str(np)+":visible"))
 			animation.track_set_path(t_z,   NodePath(str(np)+":z_index"))
 
-			animation.track_set_interpolation_type(tr,  Animation.INTERPOLATION_LINEAR)
+			var interp_type: Animation.InterpolationType = Animation.INTERPOLATION_LINEAR
+			var lower_interp := p_interpolation_mode.to_lower()
+			if lower_interp.contains("nearest") or lower_interp.contains("stepped"):
+				interp_type = Animation.INTERPOLATION_NEAREST
+			elif lower_interp.contains("cubic"):
+				interp_type = Animation.INTERPOLATION_CUBIC
+
+			animation.track_set_interpolation_type(tp,  interp_type)
+			animation.track_set_interpolation_type(tr,  interp_type)
+			animation.track_set_interpolation_type(ts,  interp_type)
 			animation.track_set_interpolation_type(trc, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis, Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_z,   Animation.INTERPOLATION_NEAREST)

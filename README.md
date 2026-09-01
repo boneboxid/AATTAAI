@@ -1,11 +1,49 @@
 # Adobe Animate → Godot 4 Importer Plugin (AATTAAI)
 
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Godot Engine](https://img.shields.io/badge/Godot-4.x-478cbf?logo=godot-engine&logoColor=white)
+![Adobe Animate](https://img.shields.io/badge/Adobe%20Animate-2020--2025+-ED2224?logo=adobe&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+
 A powerful Godot 4 plugin for importing texture atlases and cut-out / symbol animations exported from Adobe Animate into clean, modular Godot scenes. Features a full `AnimationPlayer` setup, per-part transforms, dynamic Z-ordering, an advanced Visual Controller (`AATTAIController`) for seamless skin/slot equipment swapping, an interactive viewport preview with coordinate/floor grids, animation filtering, and non-destructive incremental scene updating.
 
 ---
 
+## 🚀 What's New in Version 2.0.0
+
+Version 2.0.0 is a major milestone release introducing powerful visual customization APIs, incremental workflow tools, performance boosts for large animation packs (80+ animations), and viewport inspection utilities:
+
+### 1. 🎭 Standalone Visual Controller (`class_name AATTAIController`)
+- **Global Reskinning**: Swap the entire character sprite atlas dynamically via `change_skin()` at runtime or in the Inspector.
+- **Slot-Based Overrides**: Swap individual part textures (e.g. replacing a weapon with a standalone axe texture) via `set_slot_texture()`, with built-in reset methods (`reset_slot_texture()`, `reset_all_slots()`).
+- **Equipment & Attachment API**: Attach custom nodes (VFX, 3D particles, Hitboxes `Area2D`, weapons) directly into character bone/layer slots via `equip("weapon", item_node)`.
+- **Playback & Signals**: Clean animation relays (`play_anim()`, `flip_h()`, `animation_finished`, `skin_changed`, `slot_changed`).
+
+### 2. 🔄 Incremental Scene Updating (`Update Existing Scene`)
+- Update existing `.tscn` character scenes by injecting or updating only selected animations into the `AnimationPlayer` without overwriting or deleting custom user nodes (Hitboxes, CollisionShapes, AudioStreamPlayers, or custom child nodes).
+
+### 3. 📋 Animation Checklist & Instant Search Bar (80+ Animations Ready)
+- Organize 80+ animations into a neat 2-column grid.
+- Instant search filter bar (`🔍`) to locate animations in real-time.
+- Quick batch selection: `☑️ All`, `⬜ None`, and `🎯 Select Filtered` (select only animations matching the search query).
+
+### 4. 🎬 Enhanced Interactive Viewport Preview
+- **📏 Coordinate & Floor Grid**: World-space ground level line (Red X-axis), center symmetry line (Green Y-axis), pivot marker `(0, 0)`, and 64px/32px grid lines with a dedicated toggle button.
+- **🔁 Loop / Play-Once Toggle**: Toggle preview looping on or off (plays once and stops at the final frame).
+- **⚡ Real-Time FPS Override**: Instant preview update when adjusting the FPS override spinbox.
+- **Debounced Viewport**: Silky-smooth 60 FPS editor performance even when managing massive animation packs.
+
+### 5. ⚡ Batch Set Animation Interpolation Tool
+- New editor tool accessible from **Project Menu → Tools → Batch Set Animation Interpolation...**.
+- Batch-modify track interpolation types (`Linear`, `Nearest / Stepped`, `Cubic`) across any character scene using exact names, comma-separated lists, or wildcard patterns (e.g. `attack*`, `hit_react`, `*pixel*`).
+
+---
+
 ## Table of Contents
+- [What's New in Version 2.0.0](#-whats-new-in-version-200)
 - [Critical Adobe Animate Setup Requirements](#-critical-adobe-animate-setup-requirements)
+- [Video Tutorials & Demos](#-video-tutorials--demos)
+- [2D Assets & Character Packs (Bonebox)](#-2d-assets--character-packs-bonebox)
 - [Key Features](#key-features)
 - [Installation](#installation)
 - [Usage — Via Editor Menu](#usage--via-editor-menu)
@@ -13,6 +51,7 @@ A powerful Godot 4 plugin for importing texture atlases and cut-out / symbol ani
   - [2. Animation Checklist & Fast Search (80+ Animations)](#2-animation-checklist--fast-search-80-animations)
   - [3. Incremental Scene Update vs Fresh Import](#3-incremental-scene-update-vs-fresh-import)
   - [4. Viewport Preview with Origin & Floor Grid](#4-viewport-preview-with-origin--floor-grid)
+  - [5. Batch Set Animation Interpolation Tool](#5-batch-set-animation-interpolation-tool)
 - [Visual Controller & Equipment API (AATTAIController)](#visual-controller--equipment-api-aattaicontroller)
   - [Global Reskin / Texture Swap](#global-reskin--texture-swap)
   - [Slot-Based Reskin (Weapon / Armor / Cosmetic)](#slot-based-reskin-weapon--armor--cosmetic)
@@ -23,6 +62,26 @@ A powerful Godot 4 plugin for importing texture atlases and cut-out / symbol ani
 - [Generating a Texture Atlas in Adobe Animate](#generating-a-texture-atlas-in-adobe-animate)
 - [Adobe Animate JSON Structure Reference](#adobe-animate-json-structure-reference)
 - [Compatibility](#compatibility)
+
+---
+
+## 🎥 Video Tutorials & Demos
+
+Check out these video walkthroughs and guides:
+
+- 📺 **Plugin Overview & Tutorial (v1.6.0)**: [Watch on YouTube](https://www.youtube.com/watch?v=K_uXYJD_xFI)
+- 📺 **v2.0.0 Demo & Feature Highlights**: [Watch on YouTube (Coming Soon / WIP)]()
+- 📺 **Godot 4 Animation Blend Tree Tutorial (by Gwizz)**: [Watch on YouTube](https://www.youtube.com/watch?v=eQUrKp19iXE)
+
+---
+
+## 🎨 2D Assets & Character Packs (Bonebox)
+
+Looking for production-ready, high-quality Adobe Animate 2D character rigs, animation packs, and game assets designed to work seamlessly with **AATTAAI**?
+
+- 🛒 **Official Asset Store / Itch.io**: [bonebox.itch.io](https://bonebox.itch.io/) *(Character animation packs, boss monsters, weapon sets & VFX)*
+- 🛠️ **Batch Export Tool (JSFL)**: [Batch-Export-Texture-Atlas](https://github.com/boneboxid/Batch-Export-Texture-Atlas) *(Batch export texture atlas symbols with one click in Adobe Animate)*
+- 💬 **Community & Support**: Follow and support on YouTube / Itch.io for updates, new character packs, and tutorials!
 
 ---
 
@@ -48,12 +107,13 @@ A powerful Godot 4 plugin for importing texture atlases and cut-out / symbol ani
 - **Incremental Scene Update (`🔄 Update Existing Scene`)**: Add or update animations in an existing `.tscn` file without deleting custom user nodes (Hitboxes `Area2D`, Hurtboxes, Particle Systems, AudioStreamPlayers, or custom sprites).
 - **Animation Checklist & Search**: Fast real-time search bar (`🔍`), multi-column grid layout, and quick-filter buttons (`☑️ All`, `⬜ None`, `🎯 Select Filtered`) designed to comfortably manage packs with 80+ animations.
 - **Pinned Action Bar**: Bottom action buttons and status indicators are permanently pinned at the bottom of the window—no need to resize or stretch the window.
-- **Interactive Viewport Preview with Grid**: Live preview with Zoom, Pan, Reset View, Color Picker, Scrubber Timeline, and toggleable **Coordinate & Floor Grid (`📏 Grid`)** featuring Ground (X-axis) and Center (Y-axis) guidelines.
+- **Interactive Viewport Preview with Grid**: Live preview with Zoom, Pan, Reset View, Color Picker, Scrubber Timeline, toggleable Loop (`🔁 Loop`), and toggleable **Coordinate & Floor Grid (`📏 Grid`)** featuring Ground (X-axis) and Center (Y-axis) guidelines.
 - **Dedicated Visual Controller (`class_name AATTAIController`)**: Built-in methods for swapping skins, overriding individual slot textures (weapons/cosmetics), and equipping custom nodes to body parts.
 - **Vector2 Rotation Blending**: Rotation is keyframed using a direction vector (`r_vec`) rather than raw float angles, natively resolving 180° rotation flipping during `AnimationTree` blending.
 - **Dynamic Z-Ordering & Keyframe Deduplication**: Discards redundant baked keyframes and preserves back-to-front layer draw order across all animations.
 - **Quick-Fix Pivot Wrappers**: Wraps sprites in parent `Node2D` pivot nodes, allowing designers to manually adjust the local pivot/offset of any body part in the Godot Viewport without modifying source assets.
 - **Texture Filter Selection**: Choose between `Linear (Smooth)` for high-res art and `Nearest (Pixel Art)` for crisp pixel graphics.
+- **Animation Track Interpolation Selection**: Choose how keyframes interpolate on transform tracks (`Linear` for smooth tweening, `Nearest / Stepped` for classic stepped frame-by-frame / anime cut-out feel, or `Cubic` for natural spline curves).
 
 ---
 
@@ -73,7 +133,12 @@ Open **Project Menu → Tools → Import Adobe Animate...**:
 1. **Spritemap JSON**: Select your atlas JSON (e.g. `res://assets/spritemap1.json`). The plugin will auto-predict the PNG and animation folder!
 2. **Spritesheet PNG**: Select your atlas texture image (e.g. `res://assets/spritemap1.png`).
 3. **Animation JSON File or Folder**: Select the master `Animation.json` or folder containing individual animation JSONs.
-4. **Output scene path**: Target file path (e.g. `res://scenes/hero.tscn`).
+4. **Configure Options**:
+   * **Use Pivot Wrapper Nodes**: Creates an intermediate `Node2D` wrapper parent for each body part sprite node. All keyframed transforms target the parent wrapper, allowing you to freely adjust the local pivot/offset of each part in the viewport without editing the importer settings.
+   * **Add Visual Controller Script**: Attaches an `AATTAIController` (`@tool`) script to the root node, exposing `change_skin()`, `set_slot_texture()`, `equip()`, and animation helper APIs.
+   * **Texture Filter Mode**: Choose between `Linear (Smooth)` (for high-resolution assets) and `Nearest (Pixel Art)` (for clean, sharp pixel art).
+   * **Animation Interpolation Mode**: Choose between `Linear (Smooth Tween)`, `Nearest / Stepped (Frame-by-Frame)`, and `Cubic (Spline Curve)`.
+5. **Output scene path**: Target file path (e.g. `res://scenes/hero.tscn`).
 
 ---
 
@@ -100,6 +165,7 @@ The window provides two distinct action buttons pinned at the bottom:
 
 ### 4. Viewport Preview with Origin & Floor Grid
 - **Play / Pause**: Play or pause current animation.
+- **`🔁 Loop` Toggle**: Toggle animation looping in the preview (when unchecked, the animation plays once and stops).
 - **Animation Dropdown**: Switch between selected animations.
 - **`📏 Grid` Toggle**: Toggles the 64px/32px grid, Ground line (Red X Axis), Center line (Green Y Axis), and `(0,0)` pivot marker.
 - **Color Picker**: Change preview background color to test light/dark contrast.
@@ -108,6 +174,15 @@ The window provides two distinct action buttons pinned at the bottom:
   - **Zoom**: Mouse Wheel Up / Down.
   - **Pan**: Right-Click or Middle-Click drag.
   - **Reset View**: Double-Click Left Mouse Button.
+
+---
+
+### 5. Batch Set Animation Interpolation Tool
+Open **Project Menu → Tools → Batch Set Animation Interpolation...**:
+Quickly change the interpolation type (`Linear`, `Nearest / Stepped`, `Cubic`) for specific animations in an existing scene:
+- **Target Scene**: Select your `.tscn` character scene.
+- **Animation Pattern**: Enter exact animation names (e.g. `hit_react`), comma-separated lists (`punch, kick, jump`), or wildcard patterns (`attack*`, `*pixel*`).
+- Click **`⚡ Apply Interpolation to Matching Animations`** to batch-update all transform tracks in one click!
 
 ---
 
@@ -227,11 +302,11 @@ func _ready():
         "res://assets/spritemap1.json",
         "res://assets/animations",
         "res://assets/spritemap1.png",
-        0,                 # fps_override (0 = from JSON)
-        [],                # anim_files_override
+        "",                # anim_folder (optional if anim_path provided)
         true,              # use_pivot_wrappers
         true,              # add_skin_swapper
-        "Linear"           # texture_filter_mode
+        "Linear",          # texture_filter_mode
+        "Linear"           # interpolation_mode
     )
     
     runtime.play_anim("walk")

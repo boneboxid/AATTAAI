@@ -17,10 +17,11 @@ var _symbol_map: Dictionary = {}  # "stickman/parts/arm" → {sprite, ox, oy}
 func import(atlas_json_path: String, anim_json_path: String,
 			png_path: String, out_path: String, fps_override: int,
 			use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
-			texture_filter_mode: String = "Linear") -> String:
+			texture_filter_mode: String = "Linear",
+			interpolation_mode: String = "Linear") -> String:
 	return import_folder(atlas_json_path, anim_json_path.get_base_dir(),
 						 png_path, out_path, fps_override, [anim_json_path],
-						 [], use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+						 [], use_pivot_wrappers, add_skin_swapper, texture_filter_mode, interpolation_mode)
 
 func get_available_animations(anim_folder_or_file: String) -> Array:
 	var result: Array = []
@@ -50,6 +51,105 @@ func get_available_animations(anim_folder_or_file: String) -> Array:
 			if not result.has(fname):
 				result.append(fname)
 	return result
+
+# ─────────────────────────────────────────────────────────
+# Tool Helper: Batch set interpolation on specific animations in a .tscn scene
+# Supports exact names, comma-separated lists, and wildcard '*' patterns (e.g. "attack*", "hit_1, hit_2")
+# ─────────────────────────────────────────────────────────
+func set_animations_interpolation(scene_path: String, anim_pattern: String, interpolation_mode: String) -> Dictionary:
+	var res := {"success": false, "modified_count": 0, "matched_anims": [], "error": ""}
+	if not FileAccess.file_exists(scene_path):
+		res["error"] = "File does not exist: " + scene_path
+		return res
+
+	var scene_res := ResourceLoader.load(scene_path, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE)
+	if scene_res == null:
+		res["error"] = "Failed to load scene: " + scene_path
+		return res
+
+	var root: Node = scene_res.instantiate()
+	if root == null:
+		res["error"] = "Failed to instantiate scene: " + scene_path
+		return res
+
+	var anim_player: AnimationPlayer = null
+	if root is AnimationPlayer:
+		anim_player = root
+	else:
+		anim_player = root.get_node_or_null("AnimationPlayer")
+		if anim_player == null:
+			for c in root.get_children():
+				if c is AnimationPlayer:
+					anim_player = c
+					break
+
+	if anim_player == null:
+		root.queue_free()
+		res["error"] = "No AnimationPlayer found in scene: " + scene_path
+		return res
+
+	var lib: AnimationLibrary = null
+	if anim_player.has_animation_library(""):
+		lib = anim_player.get_animation_library("")
+	if lib == null:
+		root.queue_free()
+		res["error"] = "No AnimationLibrary found in AnimationPlayer."
+		return res
+
+	var interp_type: Animation.InterpolationType = Animation.INTERPOLATION_LINEAR
+	var lower_interp := interpolation_mode.to_lower()
+	if lower_interp.contains("nearest") or lower_interp.contains("stepped"):
+		interp_type = Animation.INTERPOLATION_NEAREST
+	elif lower_interp.contains("cubic"):
+		interp_type = Animation.INTERPOLATION_CUBIC
+
+	var patterns := []
+	for p in anim_pattern.split(","):
+		var s := p.strip_edges()
+		if not s.is_empty():
+			patterns.append(s)
+
+	if patterns.is_empty():
+		patterns.append("*")
+
+	var modified_anims := []
+	for anim_name in lib.get_animation_list():
+		var matches := false
+		for pat in patterns:
+			if pat == "*" or anim_name.matchn(pat) or anim_name.to_lower() == pat.to_lower():
+				matches = true
+				break
+		
+		if matches:
+			var anim: Animation = lib.get_animation(anim_name)
+			if anim:
+				modified_anims.append(anim_name)
+				for track_idx in range(anim.get_track_count()):
+					var track_path := str(anim.track_get_path(track_idx))
+					if track_path.ends_with(":position") or track_path.ends_with(":r_vec") or track_path.ends_with(":rotation") or track_path.ends_with(":scale"):
+						anim.track_set_interpolation_type(track_idx, interp_type)
+
+	if modified_anims.is_empty():
+		root.queue_free()
+		res["error"] = "No animations matched pattern '%s'." % anim_pattern
+		return res
+
+	var packed := PackedScene.new()
+	if packed.pack(root) != OK:
+		root.queue_free()
+		res["error"] = "PackedScene.pack() failed."
+		return res
+
+	if ResourceSaver.save(packed, scene_path) != OK:
+		root.queue_free()
+		res["error"] = "Failed to save scene: " + scene_path
+		return res
+
+	root.queue_free()
+	res["success"] = true
+	res["modified_count"] = modified_anims.size()
+	res["matched_anims"] = modified_anims
+	return res
 
 func _parse_all_animations(anim_files: Array, sprites: Dictionary, fps_override: int, selected_animations: Array = []) -> Array:
 	var all_animations: Array = []
@@ -111,7 +211,8 @@ func import_folder(atlas_json_path: String, anim_folder: String,
 				   fps_override: int, anim_files: Array = [],
 				   selected_animations: Array = [],
 				   use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
-				   texture_filter_mode: String = "Linear") -> String:
+				   texture_filter_mode: String = "Linear",
+				   interpolation_mode: String = "Linear") -> String:
 
 	# 1. Atlas
 	var atlas_data = _load_json(atlas_json_path)
@@ -137,7 +238,7 @@ func import_folder(atlas_json_path: String, anim_folder: String,
 
 	# 5. Build scene
 	return _build_scene(sprites, texture, all_animations, out_path,
-						use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+						use_pivot_wrappers, add_skin_swapper, texture_filter_mode, interpolation_mode)
 
 # ─────────────────────────────────────────────────────────
 # Entry point — UPDATE EXISTING SCENE
@@ -149,9 +250,10 @@ func update_existing_scene(atlas_json_path: String, anim_folder: String,
 						   fps_override: int, anim_files: Array = [],
 						   selected_animations: Array = [],
 						   use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
-						   texture_filter_mode: String = "Linear") -> String:
+						   texture_filter_mode: String = "Linear",
+						   interpolation_mode: String = "Linear") -> String:
 	if not FileAccess.file_exists(out_path):
-		return import_folder(atlas_json_path, anim_folder, png_path, out_path, fps_override, anim_files, selected_animations, use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+		return import_folder(atlas_json_path, anim_folder, png_path, out_path, fps_override, anim_files, selected_animations, use_pivot_wrappers, add_skin_swapper, texture_filter_mode, interpolation_mode)
 
 	var atlas_data = _load_json(atlas_json_path)
 	if atlas_data is String: return "Atlas JSON: " + atlas_data
@@ -315,7 +417,16 @@ func update_existing_scene(atlas_json_path: String, anim_folder: String,
 			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
 			animation.track_set_path(t_z,      NodePath(str(npath) + ":z_index"))
 
-			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR)
+			var interp_type: Animation.InterpolationType = Animation.INTERPOLATION_LINEAR
+			var lower_interp := interpolation_mode.to_lower()
+			if lower_interp.contains("nearest") or lower_interp.contains("stepped"):
+				interp_type = Animation.INTERPOLATION_NEAREST
+			elif lower_interp.contains("cubic"):
+				interp_type = Animation.INTERPOLATION_CUBIC
+
+			animation.track_set_interpolation_type(t_pos,    interp_type)
+			animation.track_set_interpolation_type(t_rot,    interp_type)
+			animation.track_set_interpolation_type(t_scl,    interp_type)
 			animation.track_set_interpolation_type(t_rect,   Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis,    Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_z,      Animation.INTERPOLATION_NEAREST)
@@ -843,7 +954,8 @@ func _normalize_angle_sequence(angles: Array) -> Array:
 func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 						all_animations: Array,
 						use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
-						texture_filter_mode: String = "Linear") -> Node2D:
+						texture_filter_mode: String = "Linear",
+						interpolation_mode: String = "Linear") -> Node2D:
 
 	# Load sprite script to handle Vector2 rotation blending
 	var spr_script
@@ -1025,7 +1137,16 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 			animation.track_set_path(t_vis,    NodePath(str(npath) + ":visible"))
 			animation.track_set_path(t_z,      NodePath(str(npath) + ":z_index"))
 
-			animation.track_set_interpolation_type(t_rot,    Animation.INTERPOLATION_LINEAR)
+			var interp_type: Animation.InterpolationType = Animation.INTERPOLATION_LINEAR
+			var lower_interp := interpolation_mode.to_lower()
+			if lower_interp.contains("nearest") or lower_interp.contains("stepped"):
+				interp_type = Animation.INTERPOLATION_NEAREST
+			elif lower_interp.contains("cubic"):
+				interp_type = Animation.INTERPOLATION_CUBIC
+
+			animation.track_set_interpolation_type(t_pos,    interp_type)
+			animation.track_set_interpolation_type(t_rot,    interp_type)
+			animation.track_set_interpolation_type(t_scl,    interp_type)
 			animation.track_set_interpolation_type(t_rect,   Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_vis,    Animation.INTERPOLATION_NEAREST)
 			animation.track_set_interpolation_type(t_z,      Animation.INTERPOLATION_NEAREST)
@@ -1230,8 +1351,9 @@ func _create_scene_tree(sprites: Dictionary, texture: Texture2D,
 func _build_scene(sprites: Dictionary, texture: Texture2D,
 				  all_animations: Array, out_path: String,
 				  use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
-				  texture_filter_mode: String = "Linear") -> String:
-	var root := _create_scene_tree(sprites, texture, all_animations, use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+				  texture_filter_mode: String = "Linear",
+				  interpolation_mode: String = "Linear") -> String:
+	var root := _create_scene_tree(sprites, texture, all_animations, use_pivot_wrappers, add_skin_swapper, texture_filter_mode, interpolation_mode)
 	if root == null:
 		return "Failed to build scene tree."
 
@@ -1268,7 +1390,8 @@ func import_in_memory(atlas_json_path: String, anim_folder: String,
 					  png_path: String, fps_override: int, anim_files: Array = [],
 					  selected_animations: Array = [],
 					  use_pivot_wrappers: bool = true, add_skin_swapper: bool = true,
-					  texture_filter_mode: String = "Linear") -> Node2D:
+					  texture_filter_mode: String = "Linear",
+					  interpolation_mode: String = "Linear") -> Node2D:
 	var atlas_data = _load_json(atlas_json_path)
 	if atlas_data is String: return null
 	var sprites: Dictionary = _parse_atlas(atlas_data)
@@ -1285,7 +1408,7 @@ func import_in_memory(atlas_json_path: String, anim_folder: String,
 	if all_animations.is_empty(): return null
 
 	return _create_scene_tree(sprites, texture, all_animations,
-							  use_pivot_wrappers, add_skin_swapper, texture_filter_mode)
+							  use_pivot_wrappers, add_skin_swapper, texture_filter_mode, interpolation_mode)
 
 # ─────────────────────────────────────────────────────────
 # Helpers
